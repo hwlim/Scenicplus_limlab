@@ -28,20 +28,17 @@ dependencies:
   - scipy
   - scikit-learn
   - matplotlib
-  - seaborn
   - networkx
   - pyranges
   - scanpy
   - anndata
   - mudata
   - h5py
-  - tqdm
   # ---- R + the few R packages our step-01 script needs ----
   - r-base>=4.2
   - r-seurat
   - r-matrix
   - r-optparse
-  - r-essentials
   # ---- Python deps best installed via pip ----
   - pip:
       - "pycisTopic @ git+https://github.com/aertslab/pycisTopic.git"
