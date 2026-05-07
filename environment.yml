@@ -1,0 +1,49 @@
+# Conda environment for the SCENIC+ pipeline.
+#
+#   conda env create -f environment.yml
+#   conda activate scenicplus_limlab
+#
+# Notes
+# -----
+# - SCENIC+ itself is best installed from source (the published PyPI package
+#   lags upstream); the `pip:` block below pulls from GitHub. If your cluster
+#   has no outbound internet, clone https://github.com/aertslab/scenicplus and
+#   replace that line with `pip install -e /path/to/scenicplus`.
+# - R packages are taken from conda-forge / bioconda — keeping R inside the
+#   same env removes a class of "wrong R / mismatched libraries" issues.
+# - Versions are loose on purpose. SCENIC+'s transitive deps shift often;
+#   pinning everything tight tends to break installs more than it helps.
+name: scenicplus_limlab
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - snakemake>=7.32
+  - pyyaml
+  - numpy
+  - pandas
+  - scipy
+  - scikit-learn
+  - matplotlib
+  - seaborn
+  - networkx
+  - pyranges
+  - scanpy
+  - anndata
+  - mudata
+  - h5py
+  - tqdm
+  # ---- R + the few R packages our step-01 script needs ----
+  - r-base>=4.2
+  - r-seurat
+  - r-matrix
+  - r-optparse
+  - r-essentials
+  # ---- Python deps best installed via pip ----
+  - pip:
+      - "pycisTopic @ git+https://github.com/aertslab/pycisTopic.git"
+      - "pycistarget @ git+https://github.com/aertslab/pycistarget.git"
+      - "scenicplus @ git+https://github.com/aertslab/scenicplus.git"

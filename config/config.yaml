@@ -1,0 +1,128 @@
+# =============================================================================
+# SCENIC+ pipeline configuration
+# =============================================================================
+# Single-cell multiome (RNA + ATAC) -> TF-gene regulatory networks.
+# Edit the paths and parameters below before running the pipeline.
+# =============================================================================
+
+# Pipeline identifier. The Snakefile aborts if this is missing or wrong, so
+# that another pipeline's config file cannot be fed into SCENIC+ by accident.
+Pipeline: "ScenicPlus"
+
+# -----------------------------------------------------------------------------
+# Input
+# -----------------------------------------------------------------------------
+input:
+  # Seurat .rds object containing both modalities.
+  #   - Normalized expression in the "RNA" assay
+  #   - Peak counts in the "peaks" assay
+  #   - Cell-type annotation in metadata column `celltype_column`
+  seurat_rds: "/path/to/seurat_object.rds"
+
+  # Metadata column carrying the cell-type label used for DARs and downstream grouping.
+  celltype_column: "cell_type"
+
+  # Optional: restrict the analysis to a focused subset of cell types. Cells
+  # with a `celltype_column` value not in this list are dropped at step 01,
+  # so topic modeling / DARs / metacells / RSS all operate on the focused
+  # universe. Leave empty (or omit) to use every cell.
+  # Example:
+  #   celltype_scope: ["Purkinje", "Granule", "MLI1", "MLI2"]
+  celltype_scope: []
+
+  # Genome assembly + species; used by SCENIC+ to fetch genome annotation from Biomart.
+  species: "hsapiens"            # one of: hsapiens, mmusculus, dmelanogaster, ggallus
+  assembly: "hg38"
+  biomart_host: "http://www.ensembl.org"
+
+  # cisTarget databases (download from https://resources.aertslab.org/cistarget/databases/)
+  ctx_db: "/path/to/cistarget/hg38_screen_v10_clust.regions_vs_motifs.rankings.feather"
+  dem_db: "/path/to/cistarget/hg38_screen_v10_clust.regions_vs_motifs.scores.feather"
+
+  # Motif-to-TF annotations (download from https://resources.aertslab.org/cistarget/motif2tf/)
+  motif_annotations: "/path/to/motifs-v10nr_clust-nr.hgnc-m0.001-o0.0.tbl"
+
+# -----------------------------------------------------------------------------
+# Output
+# -----------------------------------------------------------------------------
+output:
+  root: "results"             # all pipeline outputs go here
+  tmp: "tmp"                  # scratch directory (large, can be deleted after run)
+
+# -----------------------------------------------------------------------------
+# pycisTopic / topic-modeling parameters
+# -----------------------------------------------------------------------------
+cistopic:
+  # Topic modeling
+  n_topics: [2, 5, 10, 20, 30, 40, 50]   # candidate topic numbers; best is selected
+  n_iter: 150
+  alpha: 50
+  alpha_by_topic: true
+  eta: 0.1
+  eta_by_topic: false
+  random_state: 555
+
+  # DARs (differentially accessible regions) per cell-type
+  dar_adjpval_thr: 0.05
+  dar_log2fc_thr: 0.5
+
+# -----------------------------------------------------------------------------
+# SCENIC+ data-prep parameters (passed through to its config.yaml)
+# -----------------------------------------------------------------------------
+scenicplus:
+  is_multiome: true
+  bc_transform_func: "lambda x: x"
+  direct_annotation: ["Direct_annot"]
+  extended_annotation: ["Orthology_annot", "Motif_similarity_annot",
+                        "Motif_similarity_and_Orthology_annot"]
+  search_space_upstream: "1000 150000"
+  search_space_downstream: "1000 150000"
+  search_space_extend_tss: "10 10"
+  annotation_version: "v10nr_clust"
+  motif_similarity_fdr: 0.001
+  orthologous_identity_threshold: 0.0
+  annotations_to_use: ["Direct_annot", "Orthology_annot"]
+  fraction_overlap_w_dem_database: 0.4
+  fraction_overlap_w_ctx_database: 0.4
+  dem_max_bg_regions: 500
+  dem_balance_number_of_promoters: true
+  dem_promoter_space: 1000
+  dem_adj_pval_thr: 0.05
+  dem_log2fc_thr: 1.0
+  dem_mean_fg_thr: 0.0
+  dem_motif_hit_thr: 3.0
+  ctx_auc_threshold: 0.005
+  ctx_nes_threshold: 3.0
+  ctx_rank_threshold: 0.05
+
+# -----------------------------------------------------------------------------
+# GRN-inference parameters
+# -----------------------------------------------------------------------------
+grn:
+  tf_to_gene_importance_method: "GBM"      # GBM | RF | ET
+  region_to_gene_importance_method: "GBM"
+  region_to_gene_correlation_method: "SR"  # SR | PR
+  order_regions_to_genes_by: "importance"
+  order_TFs_to_genes_by: "importance"
+  gsea_n_perm: 1000
+  quantile_thresholds_region_to_gene: [0.85, 0.90, 0.95]
+  top_n_regionTogenes_per_gene: [5, 10, 15]
+  top_n_regionTogenes_per_region: [] # leave empty to disable
+  min_regions_per_gene: 0
+  rho_threshold: 0.05
+  min_target_genes: 10
+
+# -----------------------------------------------------------------------------
+# Compute resources
+# -----------------------------------------------------------------------------
+resources:
+  n_cpu: 16
+  seed: 555
+
+# -----------------------------------------------------------------------------
+# Visualization
+# -----------------------------------------------------------------------------
+visualization:
+  top_n_eRegulons_per_celltype: 5
+  network_top_n_TFs: 10
+  network_top_n_targets_per_TF: 25
