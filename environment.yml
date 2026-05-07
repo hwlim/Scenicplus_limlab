@@ -34,6 +34,9 @@ dependencies:
   - anndata
   - mudata
   - h5py
+  - setuptools
+  - wheel
+  - cython
   # ---- R + the few R packages our step-01 script needs ----
   - r-base>=4.2
   - r-seurat
