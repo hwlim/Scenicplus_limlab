@@ -19,7 +19,7 @@ channels:
   - bioconda
   - defaults
 dependencies:
-  - python=3.11
+  - python=3.11.8
   - pip
   - snakemake>=7.32
   - pyyaml
