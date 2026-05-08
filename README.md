@@ -57,15 +57,19 @@ $SCENICPLUS_PATH/                          # central pipeline (set by the user)
    export PATH="$SCENICPLUS_PATH/scripts:$PATH"
    ```
 
-2. Create the conda environment. A pinned `environment.yml` is shipped at
-   the repo root and contains both the Python and R packages the pipeline
-   needs (snakemake, scenicplus + pycisTopic + pycistarget, scanpy / anndata
-   / mudata, R + Seurat / Matrix / optparse, …):
+2. Create the conda environment. `environment.yml` at the repo root pins
+   Python 3.11.8, R + Seurat / Matrix / optparse, and a single pip line for
+   `scenicplus` (which pulls `pycisTopic` and `pycistarget` in transitively
+   along with the rest of the Python stack — scanpy / anndata / mudata /
+   pyranges / pybedtools / …):
 
    ```bash
    conda env create -f "$SCENICPLUS_PATH/environment.yml"
-   conda activate scenicplus
+   conda activate scenicplus_limlab
    ```
+
+   If your cluster has no outbound internet, clone the SCENIC+ repo and
+   `pip install -e /path/to/scenicplus` from a local checkout instead.
 
    You can also use a pre-existing env — just point the launcher at it via
    `SCENICPLUS_ENV=<env_name>` and it will `conda activate` for you.
@@ -82,9 +86,15 @@ $SCENICPLUS_PATH/                          # central pipeline (set by the user)
    cluster compute node has a different env from the submitting host).
 
 3. Download external resources (one-time):
-   - cisTarget databases (rankings + scores) —
+   - **cisTarget databases (rankings + scores)** — **required**. These large
+     feather files are not bundled in any pip package; you must download and
+     point `input.ctx_db` / `input.dem_db` at them.
      <https://resources.aertslab.org/cistarget/databases/>
-   - Motif-to-TF annotations —
+   - **Motif-to-TF annotations** — auto-downloaded by pycistarget at runtime
+     for `homo_sapiens`, `mus_musculus`, and `drosophila_melanogaster` if
+     `input.motif_annotations` is left blank. Pre-fetching is still
+     recommended (compute nodes often lack outbound HTTPS, and required for
+     any other species).
      <https://resources.aertslab.org/cistarget/motif2tf/>
 
 ## Running an analysis
