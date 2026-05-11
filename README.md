@@ -57,7 +57,7 @@ $SCENICPLUS_PATH/                          # central pipeline (set by the user)
    export PATH="$SCENICPLUS_PATH/scripts:$PATH"
    ```
 
-2. Create the conda environment. `environment.yml` at the repo root pins
+2. Create the conda environment (See section #4 for macos). `environment.yml` at the repo root pins
    Python 3.11.8, R + Seurat / Matrix / optparse, and a single pip line for
    `scenicplus` (which pulls `pycisTopic` and `pycistarget` in transitively
    along with the rest of the Python stack — scanpy / anndata / mudata /
@@ -96,6 +96,18 @@ $SCENICPLUS_PATH/                          # central pipeline (set by the user)
      recommended (compute nodes often lack outbound HTTPS, and required for
      any other species).
      <https://resources.aertslab.org/cistarget/motif2tf/>
+
+4. For mac os, the currrent environment.yml may not work straight due to limited
+   availability of the precompiled packages. For example, scenicplus installation
+   via pip would gives error regarding pybedtools and setuptools. In such case,
+   step-by-step installation as shown below is advised.
+
+   ```bash
+   conda env create -f "$SCENICPLUS_PATH/environment_macos.yml"
+   conda activate scenicplus_limlab
+   pip install --no-build-isolation pybedtools==0.9.1
+   pip install "scenicplus @ git+https://github.com/aertslab/scenicplus.git"
+   ```
 
 ## Running an analysis
 

@@ -1,0 +1,29 @@
+# Conda environment for the SCENIC+ pipeline.
+# This is enhanced environment to add R, Seurat, and yaml functionality
+#
+# 2026/05/07
+# Installation tested by Hee Woong Lim at CCHMC HPC; 
+# But scenicplus run not tested yet
+#
+
+name: scenicplus_limlab
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.11.8
+  - pyyaml
+  - pip
+  # This specificiation is not mentioned in the official scenicplus page; manually added
+  - setuptools<80
+  - bedtools
+  # ---- R + other R-dependencies ----
+  - r-base>=4.2
+  - r-seurat
+  - r-matrix
+  - r-optparse
+
+# Then manually install the packages below after activating the conda enviroment
+# pip install --no-build-isolation pybedtools==0.9.1
+# pip install "scenicplus @ git+https://github.com/aertslab/scenicplus.git"
