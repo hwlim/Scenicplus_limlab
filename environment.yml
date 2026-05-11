@@ -15,6 +15,7 @@ dependencies:
   - python=3.11.8
   - pyyaml
   - pip
+  - pybedtools
   # This specificiation is not mentioned in the official scenicplus page; manually added
   - setuptools<80
   # ---- R + other R-dependencies ----
