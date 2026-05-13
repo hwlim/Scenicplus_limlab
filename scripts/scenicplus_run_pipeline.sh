@@ -46,16 +46,16 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# ---- Optional conda activation --------------------------------------------
-if [[ -n "${SCENICPLUS_ENV:-}" ]]; then
-    # shellcheck disable=SC1091
-    source "$(conda info --base)/etc/profile.d/conda.sh"
-    conda activate "$SCENICPLUS_ENV"
-fi
-
-if [[ "${SCENICPLUS_SKIP_CHECK:-0}" != "1" ]]; then
-    "$SCENICPLUS_PATH/scripts/scenicplus_check.sh"
-fi
+## ---- Optional conda activation --------------------------------------------
+#if [[ -n "${SCENICPLUS_ENV:-}" ]]; then
+#    # shellcheck disable=SC1091
+#    source "$(conda info --base)/etc/profile.d/conda.sh"
+#    conda activate "$SCENICPLUS_ENV"
+#fi
+#
+# if [[ "${SCENICPLUS_SKIP_CHECK:-0}" != "1" ]]; then
+#     "$SCENICPLUS_PATH/scripts/scenicplus_check.sh"
+# fi
 
 mkdir -p logs results tmp
 
@@ -216,7 +216,7 @@ run_step 5 region_sets \
 run_step 6 init_scenicplus \
     "input.species,input.assembly,input.biomart_host,input.ctx_db,input.dem_db,input.motif_annotations,scenicplus,grn,resources.n_cpu,resources.seed,output.tmp" \
     "$S06" "
-        python '$SCRIPT_DIR/scenicplus_06_init_inner.py' \
+        bash '$SCRIPT_DIR/scenicplus_06_init_inner.sh' \
             --config '$CONFIG' \
             --out_dir '$SCPLUS_PIPELINE' \
             --cistopic_obj '$S04' \
@@ -231,7 +231,7 @@ run_step 7 run_scenicplus \
     "$S07" "
         cd '$SCPLUS_PIPELINE/Snakemake' && \
         snakemake --cores '$N_CPU' --rerun-incomplete \
-            > 'logs/07_run_scenicplus.log' 2>&1
+            > '../../../logs/07_run_scenicplus.log' 2>&1
     "
 
 run_step 8 postprocess_tsv \
@@ -241,7 +241,7 @@ run_step 8 postprocess_tsv \
             --scplus_mdata '$S07' \
             --config '$CONFIG' \
             --out_dir '$TSV_DIR' \
-            > 'logs/08_postprocess_tsv.log' 2>&1
+            > '../../../logs/08_postprocess_tsv.log' 2>&1
     "
 
 run_step 9 visualize \
@@ -251,7 +251,7 @@ run_step 9 visualize \
             --scplus_mdata '$S07' \
             --config '$CONFIG' \
             --out_dir '$PLOT_DIR' \
-            > 'logs/09_visualize.log' 2>&1
+            > '../../../logs/09_visualize.log' 2>&1
     "
 
 echo "[scenicplus_run_pipeline] done."

@@ -24,7 +24,7 @@ interim/rna.h5ad        interim/cistopic_obj.pkl
                        interim/region_sets/{DARs_*,Topics_otsu,Topics_top_3k}/*.bed
    │                               │
    └──────────────┬────────────────┘
-                  │  (06) scenicplus_06_init_inner.py        — scaffold + patch SCENIC+ config
+                  │  (06) scenicplus_06_init_inner.sh        — scaffold + patch SCENIC+ config
                   ▼
        results/scplus_pipeline/Snakemake/config/config.yaml
                   │  (07) snakemake (SCENIC+ inner pipeline, invoked by driver)

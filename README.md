@@ -36,7 +36,8 @@ $SCENICPLUS_PATH/                          # central pipeline (set by the user)
     ├── scenicplus_03_create_cistopic.py
     ├── scenicplus_04_topic_modeling.py
     ├── scenicplus_05_region_sets.py
-    ├── scenicplus_06_init_inner.py
+    ├── scenicplus_06_init_inner.sh
+    ├── scenicplus_06_patch_config.py
     ├── scenicplus_07_postprocess_tsv.py
     └── scenicplus_08_visualize.py
 
@@ -78,7 +79,7 @@ $SCENICPLUS_PATH/                          # central pipeline (set by the user)
 
    ```bash
    scenicplus_check.sh                              # check current shell
-   SCENICPLUS_ENV=scenicplus scenicplus_check.sh    # check a specific env
+   SCENICPLUS_ENV=scenicplus_limlab scenicplus_check.sh    # check a specific env
    ```
 
    The launcher scripts run this preflight automatically before kicking off
@@ -125,10 +126,10 @@ scenicplus_init.sh
 $EDITOR config/config.yaml
 
 # 4a. Workstation
-SCENICPLUS_ENV=scenicplus scenicplus_run_workstation.sh
+SCENICPLUS_ENV=scenicplus_limlab scenicplus_run_workstation.sh
 
 # 4b. LSF (single bsub'd driver job)
-SCENICPLUS_ENV=scenicplus LSF_QUEUE=long LSF_CORES=16 \
+SCENICPLUS_ENV=scenicplus_limlab LSF_QUEUE=long LSF_CORES=16 \
     scenicplus_run_lsf.sh
 ```
 
