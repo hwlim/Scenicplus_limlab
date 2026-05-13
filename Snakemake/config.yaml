@@ -1,0 +1,85 @@
+input_data:
+  cisTopic_obj_fname: /data/parklabngs/Lim.0.Analysis/20240521-multiome-kidney/Seurat/merged_macs/ENP/ScenicPlus/results/interim/cistopic_obj_with_topics.pkl
+  GEX_anndata_fname: /data/parklabngs/Lim.0.Analysis/20240521-multiome-kidney/Seurat/merged_macs/ENP/ScenicPlus/results/interim/rna.h5ad
+  region_set_folder: /data/parklabngs/Lim.0.Analysis/20240521-multiome-kidney/Seurat/merged_macs/ENP/ScenicPlus/results/interim/region_sets
+  ctx_db_fname: /data/limlab/Resource/Scenicplus_db/cistarget/database/mus_musculus/mm10/screen/mc_v10_clust/region_based/mm10_screen_v10_clust.regions_vs_motifs.rankings.feather
+  dem_db_fname: /data/limlab/Resource/Scenicplus_db/cistarget/database/mus_musculus/mm10/screen/mc_v10_clust/region_based/mm10_screen_v10_clust.regions_vs_motifs.scores.feather
+  path_to_motif_annotations: /data/limlab/Resource/Scenicplus_db/cistarget/motif2tf/motifs-v10nr_clust-nr.mgi-m0.001-o0.0.tbl
+output_data:
+  combined_GEX_ACC_mudata: /data/parklabngs/Lim.0.Analysis/20240521-multiome-kidney/Seurat/merged_macs/ENP/ScenicPlus/results/scplus_out/ACC_GEX.h5mu
+  dem_result_fname: /data/parklabngs/Lim.0.Analysis/20240521-multiome-kidney/Seurat/merged_macs/ENP/ScenicPlus/results/scplus_out/dem_results.hdf5
+  ctx_result_fname: /data/parklabngs/Lim.0.Analysis/20240521-multiome-kidney/Seurat/merged_macs/ENP/ScenicPlus/results/scplus_out/ctx_results.hdf5
+  output_fname_dem_html: /data/parklabngs/Lim.0.Analysis/20240521-multiome-kidney/Seurat/merged_macs/ENP/ScenicPlus/results/scplus_out/dem_results.html
+  output_fname_ctx_html: /data/parklabngs/Lim.0.Analysis/20240521-multiome-kidney/Seurat/merged_macs/ENP/ScenicPlus/results/scplus_out/ctx_results.html
+  cistromes_direct: /data/parklabngs/Lim.0.Analysis/20240521-multiome-kidney/Seurat/merged_macs/ENP/ScenicPlus/results/scplus_out/cistromes_direct.h5ad
+  cistromes_extended: /data/parklabngs/Lim.0.Analysis/20240521-multiome-kidney/Seurat/merged_macs/ENP/ScenicPlus/results/scplus_out/cistromes_extended.h5ad
+  tf_names: /data/parklabngs/Lim.0.Analysis/20240521-multiome-kidney/Seurat/merged_macs/ENP/ScenicPlus/results/scplus_out/tf_names.txt
+  genome_annotation: /data/parklabngs/Lim.0.Analysis/20240521-multiome-kidney/Seurat/merged_macs/ENP/ScenicPlus/results/scplus_out/genome_annotation.tsv
+  chromsizes: /data/parklabngs/Lim.0.Analysis/20240521-multiome-kidney/Seurat/merged_macs/ENP/ScenicPlus/results/scplus_out/chromsizes.tsv
+  search_space: /data/parklabngs/Lim.0.Analysis/20240521-multiome-kidney/Seurat/merged_macs/ENP/ScenicPlus/results/scplus_out/search_space.tsv
+  tf_to_gene_adjacencies: /data/parklabngs/Lim.0.Analysis/20240521-multiome-kidney/Seurat/merged_macs/ENP/ScenicPlus/results/scplus_out/tf_to_gene_adj.tsv
+  region_to_gene_adjacencies: /data/parklabngs/Lim.0.Analysis/20240521-multiome-kidney/Seurat/merged_macs/ENP/ScenicPlus/results/scplus_out/region_to_gene_adj.tsv
+  eRegulons_direct: /data/parklabngs/Lim.0.Analysis/20240521-multiome-kidney/Seurat/merged_macs/ENP/ScenicPlus/results/scplus_out/eRegulons_direct.tsv
+  eRegulons_extended: /data/parklabngs/Lim.0.Analysis/20240521-multiome-kidney/Seurat/merged_macs/ENP/ScenicPlus/results/scplus_out/eRegulons_extended.tsv
+  AUCell_direct: /data/parklabngs/Lim.0.Analysis/20240521-multiome-kidney/Seurat/merged_macs/ENP/ScenicPlus/results/scplus_out/AUCell_direct.h5mu
+  AUCell_extended: /data/parklabngs/Lim.0.Analysis/20240521-multiome-kidney/Seurat/merged_macs/ENP/ScenicPlus/results/scplus_out/AUCell_extended.h5mu
+  scplus_mdata: /data/parklabngs/Lim.0.Analysis/20240521-multiome-kidney/Seurat/merged_macs/ENP/ScenicPlus/results/scplus_out/scplusmdata.h5mu
+params_general:
+  temp_dir: /data/parklabngs/Lim.0.Analysis/20240521-multiome-kidney/Seurat/merged_macs/ENP/ScenicPlus/tmp
+  n_cpu: 8
+  seed: 555
+params_data_preparation:
+  bc_transform_func: '"lambda x: f''{x}___scenicplus_run''"'
+  is_multiome: true
+  key_to_group_by: ''
+  nr_cells_per_metacells: 10
+  direct_annotation:
+  - Direct_annot
+  extended_annotation:
+  - Orthology_annot
+  - Motif_similarity_annot
+  - Motif_similarity_and_Orthology_annot
+  species: mmusculus
+  biomart_host: http://www.ensembl.org
+  search_space_upstream: 1000 150000
+  search_space_downstream: 1000 150000
+  search_space_extend_tss: 10 10
+params_motif_enrichment:
+  species: mmusculus
+  annotation_version: v10nr_clust
+  motif_similarity_fdr: 0.001
+  orthologous_identity_threshold: 0.0
+  annotations_to_use:
+  - Direct_annot
+  - Orthology_annot
+  fraction_overlap_w_dem_database: 0.4
+  dem_max_bg_regions: 500
+  dem_balance_number_of_promoters: true
+  dem_promoter_space: 1000
+  dem_adj_pval_thr: 0.05
+  dem_log2fc_thr: 1.0
+  dem_mean_fg_thr: 0.0
+  dem_motif_hit_thr: 3.0
+  fraction_overlap_w_ctx_database: 0.4
+  ctx_auc_threshold: 0.005
+  ctx_nes_threshold: 3.0
+  ctx_rank_threshold: 0.05
+params_inference:
+  tf_to_gene_importance_method: GBM
+  region_to_gene_importance_method: GBM
+  region_to_gene_correlation_method: SR
+  order_regions_to_genes_by: importance
+  order_TFs_to_genes_by: importance
+  gsea_n_perm: 1000
+  quantile_thresholds_region_to_gene:
+  - 0.85
+  - 0.9
+  - 0.95
+  top_n_regionTogenes_per_gene:
+  - 5
+  - 10
+  - 15
+  top_n_regionTogenes_per_region: []
+  min_regions_per_gene: 0
+  rho_threshold: 0.05
+  min_target_genes: 10
