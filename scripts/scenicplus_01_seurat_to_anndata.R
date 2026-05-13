@@ -56,10 +56,10 @@ if (length(scope) > 0) {
 #     (un-normalized) counts go to rna_raw_counts.mtx; the normalized log-counts
 #     go to rna_norm.mtx so both can be packed into AnnData (.X and .raw).
 DefaultAssay(obj) <- "RNA"
-rna_raw  <- GetAssayData(obj, assay = "RNA", slot = "counts")
-rna_norm <- GetAssayData(obj, assay = "RNA", slot = "data")
+rna_raw  <- GetAssayData(obj, assay = "RNA", layer = "counts")
+rna_norm <- GetAssayData(obj, assay = "RNA", layer = "data")
 if (length(rna_norm@x) == 0) {
-  stop("RNA 'data' slot is empty — normalize the RNA assay before running.")
+  stop("RNA 'data' layer is empty — normalize the RNA assay before running.")
 }
 
 writeMM(rna_raw,  file.path(opt$out_dir, "rna_raw_counts.mtx"))
@@ -72,7 +72,7 @@ write.table(colnames(rna_raw),
             quote = FALSE, row.names = FALSE, col.names = FALSE)
 
 # --- ATAC counts (peaks x cells, raw)
-atac_raw <- GetAssayData(obj, assay = "peaks", slot = "counts")
+atac_raw <- GetAssayData(obj, assay = "peaks", layer = "counts")
 writeMM(atac_raw, file.path(opt$out_dir, "atac_counts.mtx"))
 write.table(colnames(atac_raw),
             file.path(opt$out_dir, "atac_barcodes.tsv"),
