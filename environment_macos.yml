@@ -21,6 +21,7 @@ dependencies:
   # ---- R + other R-dependencies ----
   - r-base>=4.2
   - r-seurat
+  - r-signac
   - r-matrix
   - r-optparse
 
