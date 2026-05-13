@@ -13,12 +13,12 @@
 set -euo pipefail
 
 # Optional: activate a conda env first, mirroring the launcher behavior.
-if [[ -n "${SCENICPLUS_ENV:-}" ]]; then
-    # shellcheck disable=SC1091
-    source "$(conda info --base)/etc/profile.d/conda.sh"
-    conda activate "$SCENICPLUS_ENV"
-fi
-
+#if [[ -n "${SCENICPLUS_ENV:-}" ]]; then
+#    # shellcheck disable=SC1091
+#    #source "$(conda info --base)/etc/profile.d/conda.sh"
+#    #source activate "$SCENICPLUS_ENV"
+#fi
+#
 FAIL=0
 
 echo "[preflight] python: $(command -v python || echo MISSING)"
@@ -36,6 +36,7 @@ required = [
 missing = []
 for m in required:
     try:
+        print("Checking: " + m, file=sys.stderr)
         importlib.import_module(m)
     except Exception as e:
         missing.append(f"{m} ({type(e).__name__}: {e})")
@@ -54,7 +55,7 @@ if ! command -v Rscript >/dev/null 2>&1; then
     FAIL=1
 else
     Rscript - <<'R' || FAIL=1
-required <- c("Seurat", "Matrix", "optparse")
+required <- c("Seurat", "Matrix", "Signac", "optparse")
 missing <- required[!vapply(required, requireNamespace, logical(1), quietly = TRUE)]
 if (length(missing) > 0) {
     cat("[preflight] MISSING R packages:\n", file = stderr())
