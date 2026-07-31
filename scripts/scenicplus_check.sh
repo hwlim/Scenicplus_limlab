@@ -31,7 +31,7 @@ import importlib, sys
 required = [
     "yaml", "numpy", "pandas", "scipy", "matplotlib", "networkx",
     "pyranges", "scanpy", "anndata", "mudata",
-    "snakemake", "scenicplus", "pycisTopic", "pycistarget",
+    "scenicplus", "pycisTopic", "pycistarget",
 ]
 missing = []
 for m in required:

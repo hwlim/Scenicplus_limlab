@@ -2,12 +2,17 @@
 # -----------------------------------------------------------------------------
 # Master driver for the SCENIC+ pipeline.
 #
-# Replaces snakemake. Walks 9 sequential steps and skips a step iff:
+# Replaces snakemake (including SCENIC+'s former inner snakemake, now flattened
+# into native stages 06-18). Walks 20 sequential steps and skips a step iff:
 #   1) its sentinel output exists, AND
 #   2) its sentinel.cfgsha matches sha256 of the relevant config slice, AND
 #   3) the upstream sentinel is not newer than this step's sentinel.
 # Once any step runs, every later step is force-run in the same invocation
 # (cascade). Each step writes to <sentinel>.partial first, then renames.
+#
+# NOTE: flattening the inner snakemake into serial stages means the intra-DAG
+# parallelism SCENIC+'s snakemake exploited (e.g. cistarget || dem) is now
+# sequential; each stage is still multi-threaded internally via resources.n_cpu.
 #
 # Usage:
 #   scenicplus_run_pipeline.sh                    # run everything that's stale
@@ -76,7 +81,6 @@ N_CPU="$(python "$HELPER" get "$CONFIG" resources.n_cpu)"
 [[ "$TMP_DIR" = /* ]] || TMP_DIR="$PWD/$TMP_DIR"
 
 INTERIM="$ROOT/interim"
-SCPLUS_PIPELINE="$ROOT/scplus_pipeline"
 SCPLUS_OUT="$ROOT/scplus_out"
 TSV_DIR="$ROOT/tables"
 PLOT_DIR="$ROOT/plots"
@@ -132,8 +136,8 @@ run_step() {
     echo "[run]        $id $name"
     rm -f "$sentinel" "${sentinel}.cfgsha"
     mkdir -p "$(dirname "$sentinel")"
-    # Subshell so a `cd` inside the cmd (e.g. step 07) doesn't leak into the
-    # parent driver and skew $PWD for later steps.
+    # Subshell so anything a cmd does to shell state doesn't leak into the
+    # parent driver and skew $PWD / env for later steps.
     ( eval "$cmd" )
     if [[ ! -e "$sentinel" ]]; then
         echo "[scenicplus_run_pipeline] ERROR: step $id $name finished but $sentinel was not created." >&2
@@ -150,10 +154,30 @@ S02="$INTERIM/rna.h5ad"
 S03="$INTERIM/cistopic_obj.pkl"
 S04="$INTERIM/cistopic_obj_with_topics.pkl"
 S05="$INTERIM/region_sets/.done"
-S06="$SCPLUS_PIPELINE/Snakemake/config/config.yaml"
-S07="$SCPLUS_OUT/scplusmdata.h5mu"
-S08="$TSV_DIR/eRegulons_combined.tsv"
-S09="$PLOT_DIR/01_umap_celltype.pdf"
+# Steps 06-18 are the flattened SCENIC+ GRN inference DAG (formerly one opaque
+# inner snakemake). Each stage is a discrete `scenicplus` CLI call via
+# scenicplus_06_grn_stage.py; its sentinel is that stage's primary output.
+# Sentinels follow the DAG's topological order, so no stage depends on a later
+# one and the driver's linear upstream/cascade logic stays correct (upstream
+# tracking is intentionally conservative: e.g. dem is treated as downstream of
+# genome_annot even in the unbalanced branch, which over-runs but never
+# under-runs).
+S06="$SCPLUS_OUT/ACC_GEX.h5mu"              # prepare_gex_acc
+S07="$SCPLUS_OUT/genome_annotation.tsv"     # genome_annot (+chromsizes)
+S08="$SCPLUS_OUT/search_space.tsv"          # search_space
+S09="$SCPLUS_OUT/ctx_results.hdf5"          # cistarget (+html)
+S10="$SCPLUS_OUT/dem_results.hdf5"          # dem (+html)
+S11="$SCPLUS_OUT/cistromes_direct.h5ad"     # prepare_menr (+tf_names, cistromes_extended)
+S12="$SCPLUS_OUT/tf_to_gene_adj.tsv"        # tf_to_gene
+S13="$SCPLUS_OUT/region_to_gene_adj.tsv"    # region_to_gene
+S14="$SCPLUS_OUT/eRegulons_direct.tsv"      # egrn_direct
+S15="$SCPLUS_OUT/eRegulons_extended.tsv"    # egrn_extended
+S16="$SCPLUS_OUT/AUCell_direct.h5mu"        # aucell_direct
+S17="$SCPLUS_OUT/AUCell_extended.h5mu"      # aucell_extended
+S18="$SCPLUS_OUT/scplusmdata.h5mu"          # scplus_mudata (final GRN output)
+S19="$TSV_DIR/eRegulons_combined.tsv"       # postprocess_tsv
+S20="$PLOT_DIR/01_umap_celltype.pdf"        # visualize
+GRN_STAGE="$SCRIPT_DIR/scenicplus_06_grn_stage.py"
 
 echo "[scenicplus_run_pipeline] N_CPU=$N_CPU  DRY_RUN=$DRY_RUN  FORCE_FROM=$FORCE_FROM  ONLY=$ONLY_STEP"
 
@@ -213,45 +237,131 @@ run_step 5 region_sets \
         touch '$S05'
     "
 
-run_step 6 init_scenicplus \
-    "input.species,input.assembly,input.biomart_host,input.ctx_db,input.dem_db,input.motif_annotations,scenicplus,grn,resources.n_cpu,resources.seed,output.tmp" \
+run_step 6 prepare_gex_acc \
+    "scenicplus.is_multiome,scenicplus.bc_transform_func" \
     "$S06" "
-        bash '$SCRIPT_DIR/scenicplus_06_init_inner.sh' \
-            --config '$CONFIG' \
-            --out_dir '$SCPLUS_PIPELINE' \
-            --cistopic_obj '$S04' \
-            --adata '$S02' \
-            --region_sets '$INTERIM/region_sets' \
-            --scplus_out '$SCPLUS_OUT' \
-            > 'logs/06_init_scenicplus.log' 2>&1
+        python '$GRN_STAGE' --stage prepare_gex_acc \
+            --config '$CONFIG' --scplus_out '$SCPLUS_OUT' \
+            --cistopic_obj '$S04' --adata '$S02' \
+            > 'logs/06_prepare_gex_acc.log' 2>&1
     "
 
-run_step 7 run_scenicplus \
-    "resources.n_cpu" \
+run_step 7 genome_annot \
+    "input.species,input.biomart_host" \
     "$S07" "
-        cd '$SCPLUS_PIPELINE/Snakemake' && \
-        snakemake --cores '$N_CPU' --rerun-incomplete \
-            > '../../../logs/07_run_scenicplus.log' 2>&1
+        python '$GRN_STAGE' --stage genome_annot \
+            --config '$CONFIG' --scplus_out '$SCPLUS_OUT' \
+            > 'logs/07_genome_annot.log' 2>&1
     "
 
-run_step 8 postprocess_tsv \
-    "input.celltype_column,visualization.top_n_eRegulons_per_celltype" \
+run_step 8 search_space \
+    "scenicplus.search_space_upstream,scenicplus.search_space_downstream,scenicplus.search_space_extend_tss" \
     "$S08" "
+        python '$GRN_STAGE' --stage search_space \
+            --config '$CONFIG' --scplus_out '$SCPLUS_OUT' \
+            > 'logs/08_search_space.log' 2>&1
+    "
+
+run_step 9 cistarget \
+    "input.ctx_db,input.motif_annotations,input.species,scenicplus.fraction_overlap_w_ctx_database,scenicplus.ctx_auc_threshold,scenicplus.ctx_nes_threshold,scenicplus.ctx_rank_threshold,scenicplus.annotation_version,scenicplus.motif_similarity_fdr,scenicplus.orthologous_identity_threshold,scenicplus.annotations_to_use,resources.n_cpu,output.tmp" \
+    "$S09" "
+        python '$GRN_STAGE' --stage cistarget \
+            --config '$CONFIG' --scplus_out '$SCPLUS_OUT' \
+            --region_sets '$INTERIM/region_sets' \
+            > 'logs/09_cistarget.log' 2>&1
+    "
+
+run_step 10 dem \
+    "input.dem_db,input.motif_annotations,input.species,scenicplus.fraction_overlap_w_dem_database,scenicplus.dem_max_bg_regions,scenicplus.dem_balance_number_of_promoters,scenicplus.dem_promoter_space,scenicplus.dem_adj_pval_thr,scenicplus.dem_log2fc_thr,scenicplus.dem_mean_fg_thr,scenicplus.dem_motif_hit_thr,scenicplus.annotation_version,scenicplus.motif_similarity_fdr,scenicplus.orthologous_identity_threshold,scenicplus.annotations_to_use,resources.n_cpu,resources.seed,output.tmp" \
+    "$S10" "
+        python '$GRN_STAGE' --stage dem \
+            --config '$CONFIG' --scplus_out '$SCPLUS_OUT' \
+            --region_sets '$INTERIM/region_sets' \
+            > 'logs/10_dem.log' 2>&1
+    "
+
+run_step 11 prepare_menr \
+    "scenicplus.direct_annotation,scenicplus.extended_annotation" \
+    "$S11" "
+        python '$GRN_STAGE' --stage prepare_menr \
+            --config '$CONFIG' --scplus_out '$SCPLUS_OUT' \
+            > 'logs/11_prepare_menr.log' 2>&1
+    "
+
+run_step 12 tf_to_gene \
+    "grn.tf_to_gene_importance_method,resources.n_cpu,resources.seed,output.tmp" \
+    "$S12" "
+        python '$GRN_STAGE' --stage tf_to_gene \
+            --config '$CONFIG' --scplus_out '$SCPLUS_OUT' \
+            > 'logs/12_tf_to_gene.log' 2>&1
+    "
+
+run_step 13 region_to_gene \
+    "grn.region_to_gene_importance_method,grn.region_to_gene_correlation_method,resources.n_cpu,output.tmp" \
+    "$S13" "
+        python '$GRN_STAGE' --stage region_to_gene \
+            --config '$CONFIG' --scplus_out '$SCPLUS_OUT' \
+            > 'logs/13_region_to_gene.log' 2>&1
+    "
+
+run_step 14 egrn_direct \
+    "grn.order_regions_to_genes_by,grn.order_TFs_to_genes_by,grn.gsea_n_perm,grn.quantile_thresholds_region_to_gene,grn.top_n_regionTogenes_per_gene,grn.top_n_regionTogenes_per_region,grn.min_regions_per_gene,grn.rho_threshold,grn.min_target_genes,input.ctx_db,resources.n_cpu,output.tmp" \
+    "$S14" "
+        python '$GRN_STAGE' --stage egrn_direct \
+            --config '$CONFIG' --scplus_out '$SCPLUS_OUT' \
+            > 'logs/14_egrn_direct.log' 2>&1
+    "
+
+run_step 15 egrn_extended \
+    "grn.order_regions_to_genes_by,grn.order_TFs_to_genes_by,grn.gsea_n_perm,grn.quantile_thresholds_region_to_gene,grn.top_n_regionTogenes_per_gene,grn.top_n_regionTogenes_per_region,grn.min_regions_per_gene,grn.rho_threshold,grn.min_target_genes,input.ctx_db,resources.n_cpu,output.tmp" \
+    "$S15" "
+        python '$GRN_STAGE' --stage egrn_extended \
+            --config '$CONFIG' --scplus_out '$SCPLUS_OUT' \
+            > 'logs/15_egrn_extended.log' 2>&1
+    "
+
+run_step 16 aucell_direct \
+    "resources.n_cpu" \
+    "$S16" "
+        python '$GRN_STAGE' --stage aucell_direct \
+            --config '$CONFIG' --scplus_out '$SCPLUS_OUT' \
+            > 'logs/16_aucell_direct.log' 2>&1
+    "
+
+run_step 17 aucell_extended \
+    "resources.n_cpu" \
+    "$S17" "
+        python '$GRN_STAGE' --stage aucell_extended \
+            --config '$CONFIG' --scplus_out '$SCPLUS_OUT' \
+            > 'logs/17_aucell_extended.log' 2>&1
+    "
+
+run_step 18 scplus_mudata \
+    "" \
+    "$S18" "
+        python '$GRN_STAGE' --stage scplus_mudata \
+            --config '$CONFIG' --scplus_out '$SCPLUS_OUT' \
+            > 'logs/18_scplus_mudata.log' 2>&1
+    "
+
+run_step 19 postprocess_tsv \
+    "input.celltype_column,visualization.top_n_eRegulons_per_celltype" \
+    "$S19" "
         python '$SCRIPT_DIR/scenicplus_07_postprocess_tsv.py' \
-            --scplus_mdata '$S07' \
+            --scplus_mdata '$S18' \
             --config '$CONFIG' \
             --out_dir '$TSV_DIR' \
-            > '../../../logs/08_postprocess_tsv.log' 2>&1
+            > 'logs/19_postprocess_tsv.log' 2>&1
     "
 
-run_step 9 visualize \
+run_step 20 visualize \
     "input.celltype_column,visualization" \
-    "$S09" "
+    "$S20" "
         python '$SCRIPT_DIR/scenicplus_08_visualize.py' \
-            --scplus_mdata '$S07' \
+            --scplus_mdata '$S18' \
             --config '$CONFIG' \
             --out_dir '$PLOT_DIR' \
-            > '../../../logs/09_visualize.log' 2>&1
+            > 'logs/20_visualize.log' 2>&1
     "
 
 echo "[scenicplus_run_pipeline] done."

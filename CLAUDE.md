@@ -33,12 +33,17 @@ list = use every cell.
 ## Implementation note
 - Sequential bash-driven implementation starting from a seurat object. The
   outer orchestrator is `scripts/scenicplus_run_pipeline.sh` (the master
-  driver) which walks 9 step scripts (`scenicplus_01_*.R`,
-  `scenicplus_02_*.py`, …, `scenicplus_08_*.py`) in the same `scripts/`
-  folder. All shipped executables share a `scenicplus_` prefix to avoid
-  PATH collisions with other pipelines. The SCENIC+ inner pipeline at step 07
-  still uses its own snakemake under the hood — that's unavoidable and is
-  what `snakemake` in `environment.yml` is for.
+  driver) which walks 20 sequential steps in the same `scripts/` folder. All
+  shipped executables share a `scenicplus_` prefix to avoid PATH collisions
+  with other pipelines. There is no snakemake anywhere: SCENIC+'s former inner
+  snakemake (old step 07) has been flattened into native driver stages 06-18,
+  one `scenicplus` CLI call each, dispatched by `scenicplus_06_grn_stage.py`.
+  Steps 01-05 preprocess (R/pycisTopic), 06-18 are the GRN inference DAG, and
+  19-20 postprocess/visualize (`scenicplus_07_*.py`, `scenicplus_08_*.py` — the
+  file-name prefixes are historical and no longer equal the driver step
+  number). Flattening trades the inner snakemake's intra-DAG parallelism
+  (cistarget || dem, etc.) for real per-stage sentinel/`.cfgsha`/cascade resume;
+  each stage still multi-threads via `resources.n_cpu`.
 - Relevant settings parameters defined in a yaml file (`config/config.yaml`).
 - The master driver checks intermediate results before running each step. A
   step is skipped iff (a) its sentinel output exists, (b) the sha256 of the
@@ -52,8 +57,10 @@ list = use every cell.
 - Bash launchers are thin wrappers around `scenicplus_run_pipeline.sh`:
   - `scenicplus_run_workstation.sh` — `exec`s the driver in the current shell.
   - `scenicplus_run_lsf.sh` — bsubs the driver as a single LSF job
-    (cores/mem/walltime via env vars). The bsub'd job is sized for step 07,
-    which runs its own internal snakemake with that many cores.
+    (cores/mem/walltime via env vars). The bsub'd job is sized for the heaviest
+    GRN stages (cistarget/dem/tf_to_gene/region_to_gene), which multi-thread
+    with that many cores. (Now that these are discrete steps, they could later
+    be split into individually right-sized LSF jobs.)
 - Assume that the seurat object already contains cluster, cell type
   annotation, and UMAP projection. Incorporate those as much as possible.
 - Separate implementation and per-execution configuration:

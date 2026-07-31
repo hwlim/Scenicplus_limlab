@@ -30,20 +30,56 @@ nothing.
 rules calling two CLI entrypoints — `scenicplus prepare_data …` and
 `scenicplus grn_inference …`. Every node in that DAG maps one-to-one to an
 `output_data` file already enumerated in `scripts/scenicplus_06_patch_config.py`.
-Approximate DAG:
+The generated Snakefile is present in the repo at `Snakemake/Snakefile` — the
+DAG below was traced from its actual `input`/`output` wiring (13 rules, not the
+earlier ~9-rule approximation; earlier notes omitted `prepare_menr` and
+mis-attributed the genome/chromsizes edges).
+
+**True dependency structure, by level (what runs in parallel):**
 
 ```
-prepare_GEX_ACC            → ACC_GEX.h5mu
-download_genome_annot      → genome_annotation.tsv, chromsizes.tsv
-get_search_space           → search_space.tsv
-motif_enrichment_cistarget → ctx_results.hdf5, cistromes_*
-motif_enrichment_dem       → dem_results.hdf5
-TF_to_gene                 → tf_to_gene_adj.tsv
-region_to_gene             → region_to_gene_adj.tsv
-eGRN (direct/extended)     → eRegulons_direct.tsv, eRegulons_extended.tsv
-AUCell (direct/extended)   → AUCell_direct.h5mu, AUCell_extended.h5mu
-→ assemble                 → scplusmdata.h5mu
+LEVEL 0  (roots — fire simultaneously)
+├─ prepare_GEX_ACC ──────► combined_GEX_ACC_mudata (ACC_GEX.h5mu)
+├─ download_genome_annot ─► genome_annotation.tsv, chromsizes.tsv
+├─ motif_cistarget ──────► ctx_result.hdf5     ★ usually the slowest single step
+└─ motif_dem ────────────► dem_result.hdf5     (waits on genome_annot ONLY in
+                                                 "balance_number_of_promoters" mode)
+LEVEL 1
+├─ get_search_space   ◄─ GEX_ACC + genome_annot + chromsizes    → search_space.tsv
+└─ prepare_menr       ◄─ cistarget + dem + GEX_ACC              → tf_names, cistromes_{direct,extended}
+LEVEL 2  (parallel branches)
+├─ tf_to_gene         ◄─ GEX_ACC + prepare_menr(tf_names)       → tf_to_gene_adj.tsv
+└─ region_to_gene     ◄─ GEX_ACC + search_space                → region_to_gene_adj.tsv
+LEVEL 3  (parallel)
+├─ eGRN_direct        ◄─ tf_to_gene + region_to_gene + cistromes_direct   → eRegulons_direct.tsv
+└─ eGRN_extended      ◄─ tf_to_gene + region_to_gene + cistromes_extended → eRegulons_extended.tsv
+LEVEL 4  (parallel)
+├─ AUCell_direct      ◄─ eGRN_direct + GEX_ACC                  → AUCell_direct.h5mu
+└─ AUCell_extended    ◄─ eGRN_extended + GEX_ACC               → AUCell_extended.h5mu
+LEVEL 5
+└─ scplus_mudata      ◄─ AUCell_{direct,extended} + eGRN_{direct,extended} + GEX_ACC
+                                                                → scplusmdata.h5mu (rule all)
 ```
+
+Parallelism the inner snakemake exploits:
+
+- **Level 0 is the big win**: cistarget, dem, prepare_GEX_ACC, and
+  genome_annotations have no inter-dependencies and run at once. cistarget (★)
+  is typically the longest job, so dem + prepare + genome-download hide behind
+  it entirely.
+- Three more fork points: tf_to_gene ∥ region_to_gene (L2), and the
+  direct/extended split at eGRN (L3) and AUCell (L4).
+- **Critical path** (bounds wall time regardless of cores):
+  `cistarget → prepare_menr → tf_to_gene → eGRN_direct → AUCell_direct →
+  scplus_mudata` (6 nodes). Everything else can overlap beside it.
+
+**Gotchas before transcribing shell blocks verbatim:**
+
+1. Likely typo in the generated Snakefile — `get_search_space` calls
+   `scenicplus prepare_data search_spance` ("spance", line ~250). Verify whether
+   the real CLI subcommand is misspelled too or this is a generator bug.
+2. The `dem → genome_annotation` edge is **conditional** (only under
+   `balance_number_of_promoters`). Honor it in balanced mode when grouping.
 
 ## Recommendation: flatten, don't nest deeper (Option A)
 
@@ -107,6 +143,45 @@ Still removes the `snakemake` invocation (both CLIs run a full stage without the
 scheduler) with far less churn, but only 2 sentinels instead of ~10, so
 incremental resume stays coarse. Pragmatic middle ground.
 
+## Middle ground: strategic grouping (Option A′) — recommended sweet spot
+
+"2 vs ~10 stages" is a false binary. The inner Snakefile's rules are **already
+CLI subcommands** (each rule's `shell:` is a `scenicplus prepare_data …` /
+`scenicplus grn_inference …` call). So "A's transcription cost" is just *copy
+the subcommand + flags out of the Snakefile* — and once you've paid that, **how
+many `run_step`s you wrap them into is a free choice.** The real effort cliff is
+only B → anything-finer (B needs no Snakefile reading). Beyond that, landing on
+a good stage count K is nearly free.
+
+Group along the DAG's level boundaries so no group ever depends on a *later*
+group (sentinels stay monotonic, exactly as the driver expects). A clean
+5-stage cut:
+
+```
+06 prepare     = prepare_GEX_ACC + genome_annot + search_space    S=search_space.tsv
+07 motif       = cistarget + dem + prepare_menr                   S=cistromes_direct   ★ protect this
+08 adjacency   = tf_to_gene + region_to_gene                      S=region_to_gene_adj.tsv
+09 egrn        = eGRN_direct + eGRN_extended                      S=eRegulons_direct.tsv
+10 aucell+asm  = AUCell_direct + AUCell_extended + scplus_mudata  S=scplusmdata.h5mu
+```
+
+- ~90% of A's resume benefit for ~40% of the wrapper count. The expensive motif
+  enrichment (★) sits behind its own `.cfgsha`: change an eGRN/AUCell knob →
+  only 09/10 re-run; motif work untouched.
+- Want the Level-0 parallelism back? Split 07 into `07a cistarget` / `07b dem`
+  and background them; likewise `08a tf_to_gene` / `08b region_to_gene`
+  (~7 stages). Recovers the cross-branch overlap B/monolithic-A lose.
+
+### Why B is actually the *weakest* option for re-run cost
+
+Worth spelling out (the doc previously just said "coarse resume"): the nested
+snakemake gives free `--rerun-incomplete` rule-level resume today. Option B
+replaces it with a single monolithic `grn_inference` CLI that does **not** skip
+existing intermediates — so a crash 90% through re-does all of motif enrichment,
+and changing any downstream knob recomputes cistarget/dem too. B therefore loses
+**both** the cross-branch parallelism **and** the internal resume; only per-stage
+`n_cpu` threading survives. A/A′ restore stage-level resume through our driver.
+
 ## The other direction (Option C)
 
 The phrase "the main **snakemake** process" could instead mean going the
@@ -117,8 +192,11 @@ invocation. Viable, but contradicts CLAUDE.md's current commitment (bash driver
 
 ## Open decision (pick before writing code)
 
-- **A** — Bash driver, inline ~10 native stages (best resume; matches CLAUDE.md). *Recommended.*
-- **B** — Bash driver, 2 coarse stages (minimal churn, coarse resume).
+- **A** — Bash driver, inline ~13 native stages (finest resume; matches CLAUDE.md).
+- **A′** — Bash driver, ~5 stages grouped along DAG levels (~90% of A's resume
+  benefit, ~40% of the work). *Recommended sweet spot.*
+- **B** — Bash driver, 2 coarse stages (minimal churn, but forfeits the inner
+  snakemake's free rule-level resume — weakest for re-run cost).
 - **C** — Convert outer to Snakemake, include SCENIC+ rules (contradicts current design).
 
 ## Files touched when implementing (reference)
