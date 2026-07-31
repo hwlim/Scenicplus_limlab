@@ -2,9 +2,9 @@
 # -----------------------------------------------------------------------------
 # Submit the SCENIC+ pipeline to an LSF cluster as a single bsub'd driver job.
 #
-# The driver runs scenicplus_run_pipeline.sh, which walks the 9 steps sequentially. The
-# heavy step (07 run_scenicplus) internally invokes its own snakemake with
-# {LSF_CORES} cores, so the bsub'd job needs that many slots.
+# The driver runs scenicplus_run_pipeline.sh, which walks the 20 steps
+# sequentially. The heavy GRN stages (cistarget/dem/tf_to_gene/region_to_gene)
+# multi-thread with {LSF_CORES} cores, so the bsub'd job needs that many slots.
 #
 # Run from inside an analysis directory initialized with scenicplus_init.sh.
 #

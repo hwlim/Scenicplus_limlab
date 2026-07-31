@@ -24,14 +24,26 @@ interim/rna.h5ad        interim/cistopic_obj.pkl
                        interim/region_sets/{DARs_*,Topics_otsu,Topics_top_3k}/*.bed
    │                               │
    └──────────────┬────────────────┘
-                  │  (06) scenicplus_06_init_inner.sh        — scaffold + patch SCENIC+ config
-                  ▼
-       results/scplus_pipeline/Snakemake/config/config.yaml
-                  │  (07) snakemake (SCENIC+ inner pipeline, invoked by driver)
+                  │  (06-18) scenicplus_06_grn_stage.py — SCENIC+ GRN inference,
+                  │          one `scenicplus` CLI call per stage (flattened from
+                  │          the former inner snakemake):
+                  │    06 prepare_gex_acc → ACC_GEX.h5mu
+                  │    07 genome_annot    → genome_annotation.tsv, chromsizes.tsv
+                  │    08 search_space    → search_space.tsv
+                  │    09 cistarget       → ctx_results.hdf5
+                  │    10 dem             → dem_results.hdf5
+                  │    11 prepare_menr    → tf_names.txt, cistromes_{direct,extended}.h5ad
+                  │    12 tf_to_gene      → tf_to_gene_adj.tsv
+                  │    13 region_to_gene  → region_to_gene_adj.tsv
+                  │    14 egrn_direct     → eRegulons_direct.tsv
+                  │    15 egrn_extended   → eRegulons_extended.tsv
+                  │    16 aucell_direct   → AUCell_direct.h5mu
+                  │    17 aucell_extended → AUCell_extended.h5mu
+                  │    18 scplus_mudata   → scplusmdata.h5mu
                   ▼
        results/scplus_out/scplusmdata.h5mu
-                  │  (08) scenicplus_07_postprocess_tsv.py   — TSV deliverables
-                  │  (09) scenicplus_08_visualize.py         — PDF + PNG plots
+                  │  (19) scenicplus_07_postprocess_tsv.py   — TSV deliverables
+                  │  (20) scenicplus_08_visualize.py         — PDF + PNG plots
                   ▼
        results/tables/*.tsv,  results/plots/*.{pdf,png}
 ```
@@ -205,66 +217,59 @@ markers  = find_diff_features(
 
 ---
 
-## 06 · `init_scenicplus` (scaffold + patch)
+## 06-18 · SCENIC+ GRN inference (`scenicplus_06_grn_stage.py`)
 
-Run `scenicplus init_snakemake` to scaffold the inner SCENIC+ snakemake
-project, then overwrite its `config.yaml` with paths and parameters from our
-top-level config so the inner pipeline points at our cistopic object, AnnData,
-region sets, and cisTarget databases.
+This is where the heavy lifting happens: motif enrichment (cisTarget + DEM) →
+cistromes → TF-to-gene + region-to-gene adjacencies → eRegulon construction →
+AUCell → assembled MuData. It was formerly one opaque inner snakemake (old step
+07, scaffolded by `init_snakemake` + a patched config). It is now flattened
+into 13 native driver stages, each a single `scenicplus` CLI call dispatched by
+`scenicplus_06_grn_stage.py --stage <name>`. Every stage gets the same
+sentinel + `.cfgsha` + cascade treatment as steps 01-05, so editing one GRN
+parameter re-runs only the affected stage onward (e.g. `grn.rho_threshold`
+re-runs from stage 14, leaving `cistarget`/`dem` cached).
+
+The dispatcher transcribes each rule's `shell:` block from the SCENIC+-generated
+Snakefile verbatim, sourcing arguments from our top-level `config.yaml` instead
+of a patched snakemake config. All intermediates live under
+`results/scplus_out/`.
 
 - **In:** `interim/cistopic_obj_with_topics.pkl`, `interim/rna.h5ad`,
-  `interim/region_sets/`, `config/config.yaml`
-- **Out:** `results/scplus_pipeline/Snakemake/config/config.yaml`
-- **Key options:** all of `config.scenicplus.*`, `config.grn.*`,
-  `input.{species,assembly,biomart_host,ctx_db,dem_db,motif_annotations}`
+  `interim/region_sets/`, `config/config.yaml`, cisTarget/DEM databases
+- **Out (final):** `results/scplus_out/scplusmdata.h5mu`
 
-```python
-subprocess.run(["scenicplus", "init_snakemake", "--out_dir", out_dir], check=True)
+| # | stage | `scenicplus` subcommand | primary output (sentinel) |
+| - | ----- | ----------------------- | ------------------------- |
+| 06 | prepare_gex_acc | `prepare_data prepare_GEX_ACC` | `ACC_GEX.h5mu` |
+| 07 | genome_annot | `prepare_data download_genome_annotations` | `genome_annotation.tsv` (+`chromsizes.tsv`) |
+| 08 | search_space | `prepare_data search_spance` | `search_space.tsv` |
+| 09 | cistarget | `grn_inference motif_enrichment_cistarget` | `ctx_results.hdf5` |
+| 10 | dem | `grn_inference motif_enrichment_dem` | `dem_results.hdf5` |
+| 11 | prepare_menr | `prepare_data prepare_menr` | `cistromes_direct.h5ad` (+`tf_names.txt`, `cistromes_extended.h5ad`) |
+| 12 | tf_to_gene | `grn_inference TF_to_gene` | `tf_to_gene_adj.tsv` |
+| 13 | region_to_gene | `grn_inference region_to_gene` | `region_to_gene_adj.tsv` |
+| 14 | egrn_direct | `grn_inference eGRN` | `eRegulons_direct.tsv` |
+| 15 | egrn_extended | `grn_inference eGRN --is_extended` | `eRegulons_extended.tsv` |
+| 16 | aucell_direct | `grn_inference AUCell` | `AUCell_direct.h5mu` |
+| 17 | aucell_extended | `grn_inference AUCell` | `AUCell_extended.h5mu` |
+| 18 | scplus_mudata | `grn_inference create_scplus_mudata` | `scplusmdata.h5mu` |
 
-sc_cfg["input_data"] = {
-    "cisTopic_obj_fname":         cistopic_obj,
-    "GEX_anndata_fname":          adata,
-    "region_set_folder":          region_sets_dir,
-    "ctx_db_fname":               cfg["input"]["ctx_db"],
-    "dem_db_fname":               cfg["input"]["dem_db"],
-    "path_to_motif_annotations":  cfg["input"]["motif_annotations"],
-}
-sc_cfg["params_general"]          = {"temp_dir": ..., "n_cpu": ..., "seed": ...}
-sc_cfg["params_data_preparation"] = {  # search_space_*, biomart_host, species, ...
-    "is_multiome": True, "search_space_upstream": "1000 150000", ...
-}
-sc_cfg["params_motif_enrichment"] = {  # ctx/dem thresholds, motif-similarity FDR
-    "ctx_auc_threshold": 0.005, "ctx_nes_threshold": 3.0, ...
-}
-sc_cfg["params_inference"]        = {  # GBM/RF, rho_threshold, min_target_genes, ...
-    "tf_to_gene_importance_method": "GBM", "min_target_genes": 10, ...
-}
-yaml.safe_dump(sc_cfg, open(scplus_cfg_path, "w"), sort_keys=False)
-```
-
----
-
-## 07 · `run_scenicplus` (the SCENIC+ inner pipeline)
-
-Hand off to the scaffolded SCENIC+ snakemake project. This is where the heavy
-lifting happens: metacells → motif enrichment (cisTarget + DEM) → cistromes →
-TF-to-gene + region-to-gene adjacencies → eRegulon construction → AUCell.
-
-- **In:** `results/scplus_pipeline/Snakemake/config/config.yaml`
-- **Out:** `results/scplus_out/scplusmdata.h5mu` (plus per-stage intermediates:
-  `tf_to_gene_adj.tsv`, `region_to_gene_adj.tsv`, `eRegulons_direct.tsv`,
-  `eRegulons_extended.tsv`, `AUCell_{direct,extended}.h5mu`,
-  `cistromes_{direct,extended}.h5ad`, `dem_results.hdf5`, `ctx_results.hdf5`)
-- **Key options:** `threads` = `config.resources.n_cpu`
-
-```bash
-cd results/scplus_pipeline/Snakemake
-snakemake --cores ${N_CPU} --rerun-incomplete
-```
+Notes:
+- **Sequential, not parallel.** The inner snakemake overlapped independent
+  branches (e.g. cistarget || dem) across cores; the flattened driver runs
+  stages in series. Each stage still multi-threads internally via
+  `resources.n_cpu`.
+- **`search_spance` typo:** stage 08's subcommand is spelled `search_spance` in
+  the generated Snakefile and transcribed verbatim in `scenicplus_06_grn_stage.py`.
+  Verify against the installed CLI; fix in that one place if it should be
+  `search_space`.
+- **Conditional dem edge:** the `dem` stage consumes `genome_annotation.tsv`
+  only when `scenicplus.dem_balance_number_of_promoters` is true (handled in the
+  dispatcher).
 
 ---
 
-## 08 · `postprocess_tsv`
+## 19 · `postprocess_tsv`
 
 Read the final `scplusmdata.h5mu` and dump comprehensive TSVs. `RSS` is
 computed via SCENIC+'s `regulon_specificity_scores`.
@@ -302,7 +307,7 @@ rss = regulon_specificity_scores(
 
 ---
 
-## 09 · `visualize`
+## 20 · `visualize`
 
 Render one-plot-per-file PDFs *and* PNGs. UMAP, RSS rank plot, and SCENIC+'s
 `heatmap_dotplot` come from the SCENIC+ API; bar/density/network plots are

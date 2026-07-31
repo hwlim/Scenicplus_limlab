@@ -1,6 +1,6 @@
 # SCENIC+ pipeline (Seurat -> TF-gene network)
 
-A 9-step pipeline that runs SCENIC+ end-to-end on a single Seurat `.rds`
+A 20-step pipeline that runs SCENIC+ end-to-end on a single Seurat `.rds`
 multiome object (RNA + peaks/ATAC) and produces:
 
 - `results/tables/` — comprehensive TSVs of TF-region-gene links, AUC, RSS, TF summary
@@ -9,8 +9,9 @@ multiome object (RNA + peaks/ATAC) and produces:
 
 The pipeline is driven by a plain bash master script (`scenicplus_run_pipeline.sh`) that
 walks the steps sequentially, skipping any step whose output is up-to-date
-relative to the input artifacts and the relevant slice of `config.yaml`. (The
-SCENIC+ inner pipeline at step 07 still uses its own snakemake under the hood.)
+relative to the input artifacts and the relevant slice of `config.yaml`. There
+is no snakemake: SCENIC+'s GRN inference (steps 06-18) runs as discrete
+`scenicplus` CLI stages, each with its own sentinel-based resume.
 
 ## Layout
 
@@ -28,7 +29,7 @@ $SCENICPLUS_PATH/                          # central pipeline (set by the user)
     ├── scenicplus_init.sh                 # bootstrap a new analysis directory
     ├── scenicplus_check.sh                # preflight: required Python + R packages
     ├── scenicplus_helper.py               # YAML-slice + sha256 helper
-    ├── scenicplus_run_pipeline.sh         # the 9-step master driver
+    ├── scenicplus_run_pipeline.sh         # the 20-step master driver
     ├── scenicplus_run_workstation.sh      # thin wrapper for workstations
     ├── scenicplus_run_lsf.sh              # bsub wrapper for LSF clusters
     ├── scenicplus_01_seurat_to_anndata.R  # step scripts (called by the
@@ -36,10 +37,9 @@ $SCENICPLUS_PATH/                          # central pipeline (set by the user)
     ├── scenicplus_03_create_cistopic.py
     ├── scenicplus_04_topic_modeling.py
     ├── scenicplus_05_region_sets.py
-    ├── scenicplus_06_init_inner.sh
-    ├── scenicplus_06_patch_config.py
-    ├── scenicplus_07_postprocess_tsv.py
-    └── scenicplus_08_visualize.py
+    ├── scenicplus_06_grn_stage.py         # dispatches GRN stages 06-18
+    ├── scenicplus_07_postprocess_tsv.py   # driver step 19
+    └── scenicplus_08_visualize.py         # driver step 20
 
 <analysis-dir>/                            # one of these per dataset
 ├── config/config.yaml                     # the only file the user edits
@@ -83,7 +83,7 @@ $SCENICPLUS_PATH/                          # central pipeline (set by the user)
    ```
 
    The launcher scripts run this preflight automatically before kicking off
-   Snakemake. Set `SCENICPLUS_SKIP_CHECK=1` to skip it (useful when the
+   the pipeline. Set `SCENICPLUS_SKIP_CHECK=1` to skip it (useful when the
    cluster compute node has a different env from the submitting host).
 
 3. Download external resources (one-time):
@@ -213,10 +213,28 @@ config cannot be fed in by accident.
 | 3 | `create_cistopic`   | ATAC mtx                           | `interim/cistopic_obj.pkl` |
 | 4 | `topic_modeling`    | cistopic_obj.pkl                   | with-topics pkl |
 | 5 | `region_sets`       | with-topics pkl                    | `interim/region_sets/` |
-| 6 | `init_scenicplus`   | adata + cistopic + region_sets     | `scplus_pipeline/Snakemake/config/config.yaml` |
-| 7 | `run_scenicplus`    | scenicplus snakemake (inner)       | `scplus_out/scplusmdata.h5mu` |
-| 8 | `postprocess_tsv`   | scplusmdata.h5mu                   | TSVs in `results/tables/` |
-| 9 | `visualize`         | scplusmdata.h5mu                   | plots in `results/plots/` |
+| 6 | `prepare_gex_acc`   | adata + cistopic                   | `scplus_out/ACC_GEX.h5mu` |
+| 7 | `genome_annot`      | biomart                            | `scplus_out/genome_annotation.tsv`, `chromsizes.tsv` |
+| 8 | `search_space`      | ACC_GEX + genome_annot             | `scplus_out/search_space.tsv` |
+| 9 | `cistarget`         | region_sets + ctx_db               | `scplus_out/ctx_results.hdf5` |
+| 10 | `dem`              | region_sets + dem_db               | `scplus_out/dem_results.hdf5` |
+| 11 | `prepare_menr`     | cistarget + dem + ACC_GEX          | `scplus_out/tf_names.txt`, `cistromes_{direct,extended}.h5ad` |
+| 12 | `tf_to_gene`       | ACC_GEX + tf_names                 | `scplus_out/tf_to_gene_adj.tsv` |
+| 13 | `region_to_gene`   | ACC_GEX + search_space             | `scplus_out/region_to_gene_adj.tsv` |
+| 14 | `egrn_direct`      | adjacencies + cistromes_direct     | `scplus_out/eRegulons_direct.tsv` |
+| 15 | `egrn_extended`    | adjacencies + cistromes_extended   | `scplus_out/eRegulons_extended.tsv` |
+| 16 | `aucell_direct`    | eRegulons_direct + ACC_GEX         | `scplus_out/AUCell_direct.h5mu` |
+| 17 | `aucell_extended`  | eRegulons_extended + ACC_GEX       | `scplus_out/AUCell_extended.h5mu` |
+| 18 | `scplus_mudata`    | AUCell + eRegulons + ACC_GEX       | `scplus_out/scplusmdata.h5mu` |
+| 19 | `postprocess_tsv`  | scplusmdata.h5mu                   | TSVs in `results/tables/` |
+| 20 | `visualize`        | scplusmdata.h5mu                   | plots in `results/plots/` |
+
+Steps 6-18 are the SCENIC+ GRN inference DAG, each a discrete `scenicplus` CLI
+call (via `scenicplus_06_grn_stage.py`) that formerly ran inside one opaque
+inner snakemake. Because each stage now has its own `.cfgsha`, editing a GRN
+parameter re-runs only the affected stage onward — e.g. changing
+`grn.rho_threshold` re-runs from `egrn_direct` (14), leaving the expensive
+`cistarget`/`dem` motif enrichment cached.
 
 See `workflow.md` for per-step inputs/outputs, key options, and the core
 SCENIC+ / pycisTopic API calls each step makes.
