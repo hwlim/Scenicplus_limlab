@@ -35,6 +35,26 @@ input:
   assembly: "hg38"
   biomart_host: "http://www.ensembl.org"
 
+  # OPTIONAL — supply these instead of letting step 7 download them.
+  # Set BOTH or NEITHER: they come out of one call, so supplying one still
+  # needs the network for the other.
+  #
+  # Step 7 contacts Ensembl BioMart (gene annotation) AND NCBI E-utilities (the
+  # assembly report the chromosome sizes are derived from). Behind a proxy that
+  # gates either, it cannot succeed — and when the NCBI half fails it swallows
+  # the exception, writes the annotation, skips chromsizes and still EXITS 0.
+  # Step 7 now checks for the file, but an older workspace may already have a
+  # genome_annotation.tsv with no chromsizes beside it; that annotation is
+  # reusable here.
+  #
+  # chromsizes.tsv is tab-separated WITH a header row: Chromosome, Start, End.
+  # A raw UCSC .chrom.sizes has neither the header nor the Start column:
+  #   curl -O https://hgdownload.cse.ucsc.edu/goldenPath/hg38/bigZips/hg38.chrom.sizes
+  #   awk 'BEGIN{OFS="\t"; print "Chromosome","Start","End"} {print $1,0,$2}' \
+  #       hg38.chrom.sizes > chromsizes.tsv
+  genome_annotation: ""
+  chromsizes: ""
+
   # cisTarget databases (download from https://resources.aertslab.org/cistarget/databases/)
   ctx_db: "/path/to/cistarget/hg38_screen_v10_clust.regions_vs_motifs.rankings.feather"
   dem_db: "/path/to/cistarget/hg38_screen_v10_clust.regions_vs_motifs.scores.feather"
