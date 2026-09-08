@@ -95,8 +95,15 @@ def rss_plot(rss, out_dir, top_n):
     from scenicplus.RSS import plot_rss
     n_groups = rss.shape[0]
     cols = min(5, max(1, n_groups))
+    # figsize is PER SUBPLOT, not overall. plot_rss multiplies it itself --
+    #   figsize = (figsize[0] * num_columns, figsize[1] * num_rows)   RSS.py:37
+    # -- while its docstring calls the argument "the overall size of the
+    # figure". Passing an already-multiplied size squares it: with 25 cell
+    # types this asked for (4*5, 3*5) and got (100, 75) inches, i.e. a
+    # 20000 x 15000 px PNG that PIL refuses to open without raising
+    # DecompressionBombError. Measured both ways on a 25-group matrix.
     fig = plot_rss(data_matrix=rss, top_n=top_n, num_columns=cols,
-                   figsize=(4 * cols, 3 * int(np.ceil(n_groups / cols))))
+                   figsize=(4, 3))
     if fig is None:
         fig = plt.gcf()
     save(fig, out_dir, "03_rss_per_celltype")
