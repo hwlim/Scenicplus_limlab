@@ -36,11 +36,27 @@ def main():
 
     from pycisTopic.cistopic_class import create_cistopic_object
 
+    # tag_cells=False is NOT the default and it matters.
+    #
+    # create_cistopic_object defaults tag_cells=True, which appends
+    # "___<project>" to every cell name -- measured:
+    #
+    #   default          ['AAACAGCCAAGGAATC-1___scenicplus_run', ...]
+    #   tag_cells=False  ['AAACAGCCAAGGAATC-1', ...]
+    #
+    # That tag exists to keep barcodes distinct when SEVERAL samples are merged
+    # into one cisTopic object. Here everything comes from a single Seurat
+    # object whose barcodes are already unique, so it disambiguates nothing --
+    # and it silently breaks step 6, which intersects these names with the RNA
+    # AnnData's obs_names (untagged, from the same object) and dies with
+    # "No cells found which are present in both assays". The two sides came
+    # from one file and still did not match.
     cto = create_cistopic_object(
         fragment_matrix=counts_df,
         cell_names=barcodes,
         region_names=regions,
         project=args.project,
+        tag_cells=False,
     )
     cto.add_cell_data(meta)
 
