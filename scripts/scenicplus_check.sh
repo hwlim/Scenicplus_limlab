@@ -41,8 +41,13 @@
 # the files are not there. Which is why the ABI check below looks at the FILE and
 # not just at the import.
 #
+# This check PASSED on the env that then failed at step 6, which is the whole
+# reason the header above is this long: it was testing a weaker property than
+# the pipeline needs, and a green preflight is worse than none when it is wrong.
+#
 # Every check here is one the pipeline will make anyway. The point is to make
-# them all at the start, cheaply, on the machine that will run the work.
+# them all at the start, cheaply, on the machine that will run the work -- the
+# launchers run this from the driver, inside the job, not on the submit host.
 # -----------------------------------------------------------------------------
 set -uo pipefail          # NOT -e: every check must run, so the report is whole
 
