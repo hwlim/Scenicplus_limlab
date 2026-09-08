@@ -1,0 +1,70 @@
+# SCENIC+ environment — CONDA LAYER ONLY. See install_local.sh for the pip layer.
+#
+# Verified working 2026-09-07 on linux-64 (WSL2, Ubuntu 24.04, micromamba).
+# Produces: scenicplus 1.0a2, pycistarget, pycisTopic, snakemake 8.5.5,
+#           Seurat 5.5.1, Signac 1.17.1, python 3.11.8.
+#
+# WHY THIS FILE DOES NOT INSTALL scenicplus ITSELF
+# -----------------------------------------------
+# conda runs its `pip:` section as ONE `pip install`, and this install needs two
+# different build-isolation settings in the same run:
+#   * pybedtools 0.9.1 must be built with --no-build-isolation (its sdist does
+#     not declare setuptools, so an isolated build env has none);
+#   * loomxpy must be built WITH isolation (pip has to fetch its poetry backend,
+#     which is not in this env).
+# One `pip:` section cannot do both, so the pip layer lives in install_local.sh.
+#
+# WHAT DIFFERS FROM environment.yml, AND WHY
+# ------------------------------------------
+# 1. python=3.11.8 EXACTLY. scenicplus caps requires-python at "<=3.11.8"; bare
+#    `python=3.11` resolves to 3.11.16 and pip refuses to install. (The original
+#    environment.yml already had this right.)
+# 2. BUILD TOOLCHAIN added: zlib, c-compiler, cxx-compiler. scenicplus's upstream
+#    README assumes a SYSTEM toolchain. A box without gcc/g++/zlib headers cannot
+#    build pybedtools, which fails as `fatal error: zlib.h: No such file`.
+#    Harmless where a system toolchain exists.
+# 3. UNBUILDABLE PIN SATISFIED FROM CONDA: datrie=0.8.2.
+#    scenicplus ships a fully-frozen pin set, and two of those pins predate
+#    py3.11 with ONLY an sdist on PyPI that will not compile on 3.11:
+#      datrie==0.8.2     -> conda-forge HAS a py311 build. Pinned here, and the
+#                           EXACT version matters: unpinned `datrie` resolves to
+#                           0.8.3, pip then rebuilds 0.8.2 from source and fails.
+#      pybedtools==0.9.1 -> conda has NO py311 build (py38/39/310 only), so it
+#                           cannot be listed here at all -- doing so makes the
+#                           solve fail. It is compiled in install_local.sh
+#                           phase 1, which is why the toolchain in note 2 is
+#                           not optional on a box without system compilers.
+# 4. `snakemake` is NOT listed and never was. scenicplus DEPENDS on
+#    snakemake==8.5.5, so it arrives transitively through pip. It cannot be
+#    dropped from the environment even though the pipeline no longer invokes it
+#    (see FlattenIdea.md, which is wrong on this point).
+
+name: scenicplus_limlab_local
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  # --- exact, and load-bearing (see notes 1 and 3 above) ---
+  - python=3.11.8
+  - datrie=0.8.2
+  # pybedtools is NOT here on purpose: the pinned 0.9.1 has no py311 conda
+  # build (py38/39/310 only), so listing it makes the solve FAIL. It is
+  # compiled from sdist in phase 1 of install_local.sh instead.
+
+  # --- build toolchain: required where the system has no compiler (note 2) ---
+  - c-compiler
+  - cxx-compiler
+  - zlib
+  - cython
+  - setuptools<80        # scenicplus/pybedtools break on the >=80 removals
+  - wheel
+  - pip
+
+  # --- workflow requirements (steps 01 and the R export) ---
+  - pyyaml
+  - r-base>=4.2
+  - r-seurat
+  - r-signac
+  - r-matrix
+  - r-optparse

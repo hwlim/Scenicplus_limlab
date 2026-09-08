@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# Build the SCENIC+ environment: conda layer from environment.local.yml, then
+# the pip layer in two phases.
+#
+# Verified 2026-09-07 on linux-64 (WSL2, micromamba). Result: scenicplus 1.0a2,
+# pycistarget, pycisTopic, snakemake 8.5.5, Seurat 5.5.1, Signac 1.17.1.
+#
+#   ./install_local.sh [PREFIX]      # default: ./scenicplus_env
+#
+# Works with micromamba, mamba or conda -- whichever is found.
+#
+# WHY TWO PIP PHASES. scenicplus ships a fully-frozen pin set, and two of the
+# pinned versions predate python 3.11 and have only an sdist on PyPI:
+#
+#   pybedtools==0.9.1 -- must compile (no py311 conda build exists either), and
+#     its sdist does not declare setuptools, so pip's ISOLATED build env has
+#     none and the build dies with "setuptools was not found".
+#     -> phase 1, --no-build-isolation, using this env's setuptools + cython.
+#
+#   loomxpy (git dep) -- needs the `poetry.masonry.api` build backend, which is
+#     NOT in this env, so pip must fetch it into an isolated build env.
+#     -> phase 2, isolation left ON (the default).
+#
+# The two requirements are contradictory in a single `pip install`, which is why
+# conda's `pip:` section cannot express this and this script exists.
+#
+# CC/CXX are exported explicitly because conda ships compilers under prefixed
+# names and sets CC/CXX only on `conda activate` -- and this pipeline
+# deliberately does not activate (commit ae98960). Without them the pybedtools
+# build looks for a bare `g++` and fails. Harmless if the system has its own.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_PREFIX="${1:-$HERE/scenicplus_env}"
+YML="$HERE/environment.local.yml"
+
+CONDA=""
+for c in micromamba mamba conda; do
+    if command -v "$c" >/dev/null 2>&1; then CONDA="$c"; break; fi
+done
+[[ -n "$CONDA" ]] || { echo "ERROR: need micromamba, mamba or conda on PATH" >&2; exit 1; }
+echo "### using $CONDA -> $ENV_PREFIX"
+
+echo "### phase 0: conda layer"
+"$CONDA" create -y -p "$ENV_PREFIX" -f "$YML"
+
+PY="$ENV_PREFIX/bin/python"
+[[ -x "$PY" ]] || { echo "ERROR: $PY missing after create" >&2; exit 1; }
+
+# Conda's compilers are prefixed; fall back to the system ones if absent.
+for cc in "$ENV_PREFIX"/bin/*-cc; do [[ -x "$cc" ]] && export CC="$cc"; done
+for cxx in "$ENV_PREFIX"/bin/*-c++; do [[ -x "$cxx" ]] && export CXX="$cxx"; done
+export CPATH="${CPATH:+$CPATH:}$ENV_PREFIX/include"
+echo "### CC=${CC:-<system>}  CXX=${CXX:-<system>}"
+
+echo "### phase 1: pybedtools==0.9.1 (compiles; no isolation)"
+"$PY" -m pip install --no-build-isolation "pybedtools==0.9.1"
+
+echo "### phase 2: scenicplus (isolation ON)"
+"$PY" -m pip install "scenicplus @ git+https://github.com/aertslab/scenicplus.git"
+
+echo "### verify"
+# Run from / so the env PREFIX DIRECTORY cannot be picked up as a namespace
+# package -- `import scenicplus` from the parent dir "succeeds" with __file__
+# None and proves nothing.
+cd /
+"$PY" - <<'PY'
+import importlib.util as u
+bad = 0
+for m in ("scenicplus", "pycistarget", "pycisTopic", "pybedtools",
+          "anndata", "mudata", "snakemake", "yaml"):
+    s = u.find_spec(m)
+    if s is None or s.origin is None:
+        bad += 1
+        print(f"  {m}: {'MISSING' if s is None else 'namespace-pkg (NOT a real install)'}")
+    else:
+        print(f"  {m}: ok")
+raise SystemExit(1 if bad else 0)
+PY
+"$ENV_PREFIX/bin/Rscript" -e 'for (p in c("Seurat","Signac","Matrix","optparse")) cat(sprintf("  %-9s %s\n", p, as.character(packageVersion(p))))' 2>&1 | grep -v '^Loading'
+"$ENV_PREFIX/bin/scenicplus" --help | head -2
+
+cat <<EOF
+
+### done. To use:
+    export SCENICPLUS_PATH=$HERE
+    export PATH=\$SCENICPLUS_PATH/scripts:$ENV_PREFIX/bin:\$PATH
+    export SCRNA_CONDA_ENV=$ENV_PREFIX     # scrna.tool.sh-style prefix
+EOF
