@@ -41,8 +41,26 @@ done
 [[ -n "$CONDA" ]] || { echo "ERROR: need micromamba, mamba or conda on PATH" >&2; exit 1; }
 echo "### using $CONDA -> $ENV_PREFIX"
 
+# A shared/system conda install often has a package cache the user cannot write
+# ("Could not open lockfile .../pkgs/cache/cache.lock"). Point the cache at a
+# writable location rather than fighting it.
+if [[ -z "${CONDA_PKGS_DIRS:-}" ]]; then
+    export CONDA_PKGS_DIRS="${TMPDIR:-$HOME/tmp}/conda-pkgs-$USER"
+    mkdir -p "$CONDA_PKGS_DIRS"
+    echo "### CONDA_PKGS_DIRS=$CONDA_PKGS_DIRS (override by exporting it yourself)"
+fi
+
 echo "### phase 0: conda layer"
-"$CONDA" create -y -p "$ENV_PREFIX" -f "$YML"
+# Creating an env FROM A YAML differs by tool, and getting it wrong is silent-ish:
+#   micromamba create -f env.yml      -- accepts a YAML directly
+#   conda/mamba env create -f env.yml -- NOTE the `env` subcommand
+# `conda create -f` means a SPEC FILE (one package per line), so passing a YAML
+# there makes conda read the PATH as a package name and report
+# "<path> does not exist (perhaps a typo or a missing channel)".
+case "$(basename "$CONDA")" in
+    micromamba) "$CONDA" create -y -p "$ENV_PREFIX" -f "$YML" ;;
+    *)          "$CONDA" env create -p "$ENV_PREFIX" -f "$YML" ;;
+esac
 
 PY="$ENV_PREFIX/bin/python"
 [[ -x "$PY" ]] || { echo "ERROR: $PY missing after create" >&2; exit 1; }
