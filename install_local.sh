@@ -13,6 +13,14 @@
 #   SCP_CLEAN_PKGS=1 ./install_local.sh ...  # drop partially-extracted packages
 #                                        # from the cache (CondaVerificationError
 #                                        # "... appears to be corrupted")
+#   SCP_FROM=1  ./install_local.sh ...   # skip phase 0; the conda layer is done
+#   SCP_FROM=2  ./install_local.sh ...   # skip phases 0-1; only pip scenicplus
+#
+# SCP_FROM is for when phase 0 has already SUCCEEDED and re-solving it is the
+# expensive part -- an old conda over a network filesystem can take longer to
+# re-verify a finished env than the pip layer takes to run. It refuses to skip
+# phase 0 if <prefix>/bin/python is absent, so it cannot silently proceed
+# against an env that was never built.
 #
 # Re-running is safe: an existing env is updated in place, and phase 1 is
 # skipped when pybedtools 0.9.1 is already installed. An interrupted install
@@ -93,6 +101,19 @@ if [[ "${SCP_CLEAN_PKGS:-0}" == "1" ]]; then
     done
 fi
 
+SCP_FROM="${SCP_FROM:-0}"
+
+if [[ "$SCP_FROM" -gt 0 ]]; then
+    echo "### SCP_FROM=$SCP_FROM -> skipping phase 0 (conda layer)"
+    # Skipping the conda layer means trusting an env that is already there. Say
+    # so loudly if it is not, rather than failing later inside pip with a
+    # confusing message about a missing interpreter.
+    if [[ ! -x "$ENV_PREFIX/bin/python" ]]; then
+        echo "ERROR: SCP_FROM=$SCP_FROM skips phase 0, but $ENV_PREFIX/bin/python" >&2
+        echo "       does not exist. Run without SCP_FROM to build the conda layer first." >&2
+        exit 1
+    fi
+else
 echo "### phase 0: conda layer"
 # Creating an env FROM A YAML differs by tool, and getting it wrong is silent-ish:
 #   micromamba create -f env.yml      -- accepts a YAML directly
@@ -131,6 +152,8 @@ else
     esac
 fi
 
+fi
+
 PY="$ENV_PREFIX/bin/python"
 [[ -x "$PY" ]] || { echo "ERROR: $PY missing after create" >&2; exit 1; }
 
@@ -140,11 +163,16 @@ for cxx in "$ENV_PREFIX"/bin/*-c++; do [[ -x "$cxx" ]] && export CXX="$cxx"; don
 export CPATH="${CPATH:+$CPATH:}$ENV_PREFIX/include"
 echo "### CC=${CC:-<system>}  CXX=${CXX:-<system>}"
 
+if [[ "$SCP_FROM" -gt 1 ]]; then
+    echo "### SCP_FROM=$SCP_FROM -> skipping phase 1 (pybedtools)"
+else
 echo "### phase 1: pybedtools==0.9.1 (compiles; no isolation)"
 if "$PY" -c 'import pybedtools,sys; sys.exit(0 if pybedtools.__version__=="0.9.1" else 1)' 2>/dev/null; then
     echo "  already at 0.9.1 -- skipping the compile"
 else
     "$PY" -m pip install --no-build-isolation "pybedtools==0.9.1"
+fi
+
 fi
 
 echo "### phase 2: scenicplus (isolation ON)"
