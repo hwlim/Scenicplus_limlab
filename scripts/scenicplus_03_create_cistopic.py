@@ -51,7 +51,7 @@ def main():
         pickle.dump(cto, fh)
     tmp.replace(out)
     print(f"[create_cistopic] Wrote: {out}  "
-          f"(n_regions={cto.cell_data.shape[0]}, n_cells={len(barcodes)})")
+          f"(n_regions={len(cto.region_names)}, n_cells={len(cto.cell_names)})")
 
 
 if __name__ == "__main__":
