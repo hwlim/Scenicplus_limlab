@@ -176,6 +176,22 @@ and SCENIC+ is not sized for that machine. Steps 1–3 run there comfortably.
 NOT hash it, so changing it will not re-run step 4 (correct: thread count should
 not change results).
 
+**An interrupted install leaves a broken package cache.** Re-running then fails
+with, for every affected package,
+
+    CondaVerificationError: The package for r-base located at
+    <pkgs>/r-base-4.5.3-h502d0c9_3 appears to be corrupted. The path
+    'share/man/man1/Rscript.1' specified in the package manifest cannot be found.
+
+Nothing is really corrupted -- the directories were partially EXTRACTED when the
+job died, and conda verifies them against the package manifest. The downloaded
+archives are usually fine. Fix:
+
+    SCP_CLEAN_PKGS=1 ./install_local.sh /path/to/env
+
+which drops the unpacked directories, keeps the archives (so nothing is
+re-downloaded), and resumes into the existing env folder.
+
 **Old conda may not solve the env.** `install_local.sh` prefers micromamba, then
 mamba, then conda. A 2020-vintage conda on the classic solver may be very slow
 or fail on the R + Seurat + Signac layer.
