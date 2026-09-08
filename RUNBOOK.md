@@ -52,6 +52,16 @@ Takes ~20 min; phase 2 pulls ~200 packages from PyPI. **If the cluster gates
 egress or needs an index mirror, that is where it stops** — the conda layer will
 already be complete.
 
+**Install on the node class you will run on.** Login and compute nodes can run
+different OS images and therefore different glibc, and pip picks wheels for the
+glibc of the host it runs on. On a host below glibc 2.28, three pins
+(`pybigtools==0.1.2`, `pysam==0.22.0`, `diptest==0.11.0`) have no usable wheel
+and fall back to sdists — `pybigtools` is Rust and fails with *"Cargo, the Rust
+package manager, is not installed or is not on PATH"*. The installer now checks
+this up front and stops with the reason instead of failing inside a compiler
+twenty minutes in. It also prints the glibc it sees in its `### preflight`
+block, which is the fastest way to tell the two node classes apart.
+
 Verify:
 
     /path/to/scenicplus_env/bin/scenicplus --help

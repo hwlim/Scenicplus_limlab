@@ -15,6 +15,8 @@
 #                                        # "... appears to be corrupted")
 #   SCP_FROM=1  ./install_local.sh ...   # skip phase 0; the conda layer is done
 #   SCP_FROM=2  ./install_local.sh ...   # skip phases 0-1; only pip scenicplus
+#   SCP_BUILD_TOOLCHAIN=1 ./install_local.sh ...  # glibc < 2.28: pull rust into
+#                                        # the env instead of using a newer node
 #
 # SCP_FROM is for when phase 0 has already SUCCEEDED and re-solving it is the
 # expensive part -- an old conda over a network filesystem can take longer to
@@ -192,6 +194,102 @@ for cc in "$ENV_PREFIX"/bin/*-cc; do [[ -x "$cc" ]] && export CC="$cc"; done
 for cxx in "$ENV_PREFIX"/bin/*-c++; do [[ -x "$cxx" ]] && export CXX="$cxx"; done
 export CPATH="${CPATH:+$CPATH:}$ENV_PREFIX/include"
 echo "### CC=${CC:-<system>}  CXX=${CXX:-<system>}"
+
+# ---------------------------------------------------------------------------
+# Preflight: say what pip is ALLOWED to install here before it tries.
+#
+# Every pip failure in this script so far has been a property of the HOST, not
+# of the package: which wheels its glibc accepts, and what its pip.conf says.
+# Both are one line to print and neither is visible in the failure message.
+# Only the config keys that change WHERE or WHETHER a wheel is used are shown --
+# index URLs can carry credentials.
+# ---------------------------------------------------------------------------
+echo "### preflight"
+"$PY" - <<'PY'
+import os, re
+try:
+    from pip._vendor.packaging.tags import sys_tags      # always present with pip
+except ImportError:
+    from packaging.tags import sys_tags
+libc = os.confstr("CS_GNU_LIBC_VERSION") or "libc unknown"
+gs = [tuple(map(int, m.groups())) for t in sys_tags()
+      for m in [re.match(r"manylinux_(\d+)_(\d+)_", t.platform)] if m]
+best = max(gs) if gs else (0, 0)
+print(f"  {libc}; newest wheel pip will take: manylinux_{best[0]}_{best[1]}")
+PY
+"$PY" -m pip config list 2>/dev/null \
+    | grep -E '^(global|install|:env:)\.(user|no_binary|only_binary|no_index|find_links)=' \
+    | sed 's/^/  pip config: /' || true
+( env | grep -E '^PIP_(USER|NO_BINARY|ONLY_BINARY|NO_INDEX|FIND_LINKS|INDEX_URL)=' \
+    | sed 's/^/  env: /' ) || true
+
+# ---------------------------------------------------------------------------
+# GATE: a host older than the wheels it needs. Stop here rather than 20 minutes
+# later inside a compiler.
+#
+# Three pinned dependencies publish NO linux wheel a glibc < 2.28 host can use,
+# so pip silently falls back to their sdists (verified against PyPI's file lists
+# for cp311/x86_64):
+#
+#   pybigtools==0.1.2  only manylinux_2_28 -> RUST (maturin). This is the one
+#                      that fails first, with "Cargo, the Rust package manager,
+#                      is not installed or is not on PATH".
+#   pysam==0.22.0      only manylinux_2_28 for cp311 -> C, plus bzip2/xz for the
+#                      htslib it bundles.
+#   diptest==0.11.0    only manylinux_2_24+ -> C++ (cxx-compiler, already in
+#                      environment.local.yml).
+#
+# Everything else in the pin set has a manylinux_2_17 wheel or is pure python
+# (checked: of the packages installed as binary wheels on the 2.39 reference
+# box, exactly these three lack a 2.17-compatible cp311 wheel). Bounded list,
+# not the start of a whack-a-mole.
+#
+# ON A CLUSTER THE FIRST THING TO CHECK IS WHICH NODE YOU ARE ON. Login and
+# compute nodes can run different OS images and therefore different glibc, and
+# the login node is usually the older one. Building on the newer node is the
+# right fix; pulling a Rust toolchain into the env to work around an old login
+# node is not. That also means THE ENV IS BUILT FOR THE NODE CLASS IT WAS BUILT
+# ON -- a manylinux_2_28 wheel installed from a compute node will not load back
+# on a 2.17 login node.
+#
+# SCP_BUILD_TOOLCHAIN=1 is the escape hatch when the old host really is the
+# target: it adds rust + bzip2 + xz to the env (~350 MB, and cargo needs egress
+# to crates.io, not just to the PyPI mirror).
+# ---------------------------------------------------------------------------
+GLIBC_CLASS="$("$PY" -c 'import os,re
+try:
+    from pip._vendor.packaging.tags import sys_tags
+except ImportError:
+    from packaging.tags import sys_tags
+gs=[tuple(map(int,m.groups())) for t in sys_tags()
+    for m in [re.match(r"manylinux_(\d+)_(\d+)_", t.platform)] if m]
+print("old" if (max(gs) if gs else (0,0)) < (2,28) else "new")')"
+if [[ "$GLIBC_CLASS" == "old" ]]; then
+    if [[ "${SCP_BUILD_TOOLCHAIN:-0}" == "1" && ! -x "$ENV_PREFIX/bin/cargo" ]]; then
+        echo "### SCP_BUILD_TOOLCHAIN=1 -> adding rust + bzip2 + xz to the env"
+        "$CONDA" install -y -p "$ENV_PREFIX" -c conda-forge "${COPY_ARGS[@]}" \
+            rust bzip2 xz
+    fi
+    # maturin and setuptools look for a bare `cargo`; the env is never activated
+    # here, so put its bin first -- ahead of any rustup shim that has no default
+    # toolchain configured (that shim, with no `rustup default` set, produces
+    # the very same "Cargo ... is not installed or is not on PATH" failure).
+    export PATH="$ENV_PREFIX/bin:$PATH"
+    if ! command -v cargo >/dev/null 2>&1; then
+        echo "ERROR: this host's glibc is older than 2.28, so pybigtools==0.1.2," >&2
+        echo "       pysam==0.22.0 and diptest==0.11.0 have no usable wheel and" >&2
+        echo "       must be COMPILED -- and there is no cargo on PATH for the" >&2
+        echo "       first of them. Rather than compile, in order of preference:" >&2
+        echo "         1. build on the node class you will RUN on. Login and" >&2
+        echo "            compute nodes often differ here, login being older;" >&2
+        echo "            re-run this on a compute node (bsub -Is / srun)." >&2
+        echo "         2. module load rust   (or: rustup default stable, if" >&2
+        echo "            rustup is on PATH with no default toolchain set)" >&2
+        echo "         3. SCP_BUILD_TOOLCHAIN=1 $0 $ENV_PREFIX   -- pulls rust" >&2
+        echo "            into the env; needs egress to crates.io." >&2
+        exit 1
+    fi
+fi
 
 if [[ "$SCP_FROM" -gt 1 ]]; then
     echo "### SCP_FROM=$SCP_FROM -> skipping phase 1 (pybedtools)"
