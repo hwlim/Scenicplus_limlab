@@ -31,10 +31,34 @@ sc.settings.verbosity = 0
 
 
 def save(fig, out_dir: Path, name: str):
+    """Write one figure as both .pdf and .png, whichever library made it.
+
+    NOT every SCENIC+ plotting function returns a matplotlib Figure.
+    scenicplus.plotting.dotplot.heatmap_dotplot builds a PLOTNINE ggplot and
+    returns it, and plotnine's saver is .save(), not .savefig():
+
+        AttributeError: 'ggplot' object has no attribute 'savefig'
+
+    which is what step 20 died with, after the whole GRN had been computed.
+    scenicplus.RSS.plot_rss by contrast returns None and draws through pyplot,
+    so its caller's `plt.gcf()` fallback is right for that one -- the two
+    conventions sit side by side in the same package.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_dir / f"{name}.pdf", bbox_inches="tight")
-    fig.savefig(out_dir / f"{name}.png", bbox_inches="tight", dpi=200)
-    plt.close(fig)
+    if hasattr(fig, "savefig"):                      # matplotlib Figure
+        fig.savefig(out_dir / f"{name}.pdf", bbox_inches="tight")
+        fig.savefig(out_dir / f"{name}.png", bbox_inches="tight", dpi=200)
+        plt.close(fig)
+    elif hasattr(fig, "save"):                       # plotnine ggplot
+        # verbose=False silences "Saving 16 x 6 in image"; limitsize=False
+        # because heatmap_dotplot's figsize scales with the number of
+        # eRegulons and can exceed plotnine's 25-inch guard on a real run.
+        fig.save(out_dir / f"{name}.pdf", verbose=False, limitsize=False)
+        fig.save(out_dir / f"{name}.png", dpi=200, verbose=False, limitsize=False)
+    else:
+        raise TypeError(
+            f"cannot save a {type(fig).__module__}.{type(fig).__name__}: it has "
+            f"neither .savefig() (matplotlib) nor .save() (plotnine)")
 
 
 def make_eRegulon_adata(md):
