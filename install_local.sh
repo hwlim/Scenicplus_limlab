@@ -7,6 +7,14 @@
 #
 #   ./install_local.sh [PREFIX]      # default: ./scenicplus_env
 #
+#   SCP_COPY=1  ./install_local.sh ...   # copy instead of hardlink (SMB/CIFS,
+#                                        # lustre, or anywhere hardlinks fail)
+#   SCP_FRESH=1 ./install_local.sh ...   # delete an existing prefix first
+#
+# Re-running is safe: an existing env is updated in place, and phase 1 is
+# skipped when pybedtools 0.9.1 is already installed. An interrupted install
+# can simply be re-run.
+#
 # Works with micromamba, mamba or conda -- whichever is found.
 #
 # WHY TWO PIP PHASES. scenicplus ships a fully-frozen pin set, and two of the
@@ -50,6 +58,18 @@ if [[ -z "${CONDA_PKGS_DIRS:-}" ]]; then
     echo "### CONDA_PKGS_DIRS=$CONDA_PKGS_DIRS (override by exporting it yourself)"
 fi
 
+# SMB/CIFS and other network filesystems break conda's default install method:
+# it HARDLINKS from the package cache into the env, and those filesystems either
+# refuse hardlinks or apply surprising ownership. Set SCP_COPY=1 to copy files
+# instead -- slower and larger, but it survives. (Symptom without it: permission
+# or "Operation not permitted" errors partway through the link step.)
+COPY_ARGS=()
+if [[ "${SCP_COPY:-0}" == "1" ]]; then
+    export CONDA_ALWAYS_COPY=true          # conda / mamba
+    COPY_ARGS=(--always-copy)              # micromamba
+    echo "### SCP_COPY=1 -> copying instead of hardlinking (network filesystem mode)"
+fi
+
 echo "### phase 0: conda layer"
 # Creating an env FROM A YAML differs by tool, and getting it wrong is silent-ish:
 #   micromamba create -f env.yml      -- accepts a YAML directly
@@ -57,10 +77,36 @@ echo "### phase 0: conda layer"
 # `conda create -f` means a SPEC FILE (one package per line), so passing a YAML
 # there makes conda read the PATH as a package name and report
 # "<path> does not exist (perhaps a typo or a missing channel)".
-case "$(basename "$CONDA")" in
-    micromamba) "$CONDA" create -y -p "$ENV_PREFIX" -f "$YML" ;;
-    *)          "$CONDA" env create -p "$ENV_PREFIX" -f "$YML" ;;
-esac
+#
+# RESUME: an interrupted install leaves a partial prefix, and `create` then
+# refuses it ("prefix already exists"). If one is there, install/update INTO it
+# instead, which is idempotent -- already-satisfied packages are no-ops. Use
+# --fresh to start over instead.
+if [[ "${SCP_FRESH:-0}" == "1" && -d "$ENV_PREFIX" ]]; then
+    echo "### SCP_FRESH=1 -> removing existing $ENV_PREFIX"
+    rm -rf "$ENV_PREFIX"
+fi
+
+if [[ -d "$ENV_PREFIX/conda-meta" ]]; then
+    echo "### existing env found at $ENV_PREFIX -- updating in place (resume)"
+    case "$(basename "$CONDA")" in
+        micromamba) "$CONDA" install -y -p "$ENV_PREFIX" -f "$YML" "${COPY_ARGS[@]}" ;;
+        *)          "$CONDA" env update -p "$ENV_PREFIX" -f "$YML" ;;
+    esac
+elif [[ -d "$ENV_PREFIX" ]]; then
+    # A directory with no conda-meta is a prefix that never got far enough to be
+    # an env -- an interrupted first attempt. `create` would refuse it.
+    echo "### $ENV_PREFIX exists but is not a conda env (interrupted?) -- creating into it"
+    case "$(basename "$CONDA")" in
+        micromamba) "$CONDA" create -y -p "$ENV_PREFIX" -f "$YML" "${COPY_ARGS[@]}" ;;
+        *)          "$CONDA" env create --force -p "$ENV_PREFIX" -f "$YML" ;;
+    esac
+else
+    case "$(basename "$CONDA")" in
+        micromamba) "$CONDA" create -y -p "$ENV_PREFIX" -f "$YML" "${COPY_ARGS[@]}" ;;
+        *)          "$CONDA" env create -p "$ENV_PREFIX" -f "$YML" ;;
+    esac
+fi
 
 PY="$ENV_PREFIX/bin/python"
 [[ -x "$PY" ]] || { echo "ERROR: $PY missing after create" >&2; exit 1; }
@@ -72,7 +118,11 @@ export CPATH="${CPATH:+$CPATH:}$ENV_PREFIX/include"
 echo "### CC=${CC:-<system>}  CXX=${CXX:-<system>}"
 
 echo "### phase 1: pybedtools==0.9.1 (compiles; no isolation)"
-"$PY" -m pip install --no-build-isolation "pybedtools==0.9.1"
+if "$PY" -c 'import pybedtools,sys; sys.exit(0 if pybedtools.__version__=="0.9.1" else 1)' 2>/dev/null; then
+    echo "  already at 0.9.1 -- skipping the compile"
+else
+    "$PY" -m pip install --no-build-isolation "pybedtools==0.9.1"
+fi
 
 echo "### phase 2: scenicplus (isolation ON)"
 "$PY" -m pip install "scenicplus @ git+https://github.com/aertslab/scenicplus.git"
