@@ -303,8 +303,66 @@ def main() -> int:
 
     argv = build_argv(args.stage, cfg, out, args)
     print("[grn_stage] " + " ".join(argv), flush=True)
-    subprocess.run(argv, check=True)
+    try:
+        subprocess.run(argv, check=True)
+    except subprocess.CalledProcessError:
+        # prepare_GEX_ACC fails with "No cells found which are present in both
+        # assays, check input and consider using `bc_transform_func`" and does
+        # not say what the two sets of names LOOK like, which is the only thing
+        # a reader needs. Print that here rather than make them write this
+        # snippet themselves at the worst moment.
+        if args.stage == "prepare_gex_acc":
+            _diagnose_barcodes(args, cfg)
+        raise
     return 0
+
+
+def _diagnose_barcodes(args, cfg) -> None:
+    """Show why ACC and GEX barcodes did not intersect, and the fix."""
+    try:
+        import pickle
+        import anndata
+        with open(args.cistopic_obj, "rb") as fh:
+            acc = list(pickle.load(fh).cell_names)
+        gex = list(anndata.read_h5ad(args.adata, backed="r").obs_names)
+    except Exception as e:                      # never mask the real failure
+        print(f"[grn_stage] (barcode diagnosis unavailable: {e})", file=sys.stderr)
+        return
+
+    fn = cfg.get("scenicplus", {}).get("bc_transform_func", "lambda x: x")
+    print("\n[grn_stage] barcode shapes:", file=sys.stderr)
+    print(f"[grn_stage]   ACC (cisTopic): {len(acc)} cells, e.g. {acc[:2]}", file=sys.stderr)
+    print(f"[grn_stage]   GEX (anndata) : {len(gex)} cells, e.g. {gex[:2]}", file=sys.stderr)
+    print(f"[grn_stage]   bc_transform_func in config: {fn!r}", file=sys.stderr)
+    print("[grn_stage]   (it is applied to the GEX names, to map them onto ACC)",
+          file=sys.stderr)
+
+    overlap = len(set(acc) & set(gex))
+    if overlap:
+        print(f"[grn_stage]   {overlap} name(s) already match -- the mismatch is "
+              f"elsewhere.", file=sys.stderr)
+        return
+    # The usual cause: pycisTopic's create_cistopic_object defaults to
+    # tag_cells=True and appends "___<project>" to every ACC name.
+    a0, g0 = acc[0], gex[0]
+    if "___" in a0 and a0.split("___")[0] == g0:
+        suffix = "___" + a0.split("___", 1)[1]
+        print(f"[grn_stage]   ACC names carry the pycisTopic sample tag {suffix!r};",
+              file=sys.stderr)
+        print("[grn_stage]   GEX names do not. Either rebuild step 3 without the",
+              file=sys.stderr)
+        print("[grn_stage]   tag (--from 3, redoes topic modeling), or set in",
+              file=sys.stderr)
+        print("[grn_stage]   config.yaml under scenicplus::", file=sys.stderr)
+        print(f'[grn_stage]     bc_transform_func: \'lambda x: x + "{suffix}"\'',
+              file=sys.stderr)
+    else:
+        print("[grn_stage]   No shared names and no recognised tag pattern. The two",
+              file=sys.stderr)
+        print("[grn_stage]   sides came from different cell sets, or one was",
+              file=sys.stderr)
+        print("[grn_stage]   renamed. Compare the samples they were built from.",
+              file=sys.stderr)
 
 
 if __name__ == "__main__":

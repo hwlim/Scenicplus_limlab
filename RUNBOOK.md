@@ -170,6 +170,22 @@ verified: editing `grn.tf_to_gene_importance_method` skipped 1–11 and re-ran
 | 4 | topic_modeling | `interim/cistopic_obj_with_topics.pkl` | **LDA, uses Ray.** Heaviest early step |
 | 5 | region_sets | `interim/region_sets/.done` | DARs + topic regions |
 | 6 | prepare_gex_acc | `scplus_out/ACC_GEX.h5mu` | first flattened GRN stage |
+
+**Barcodes must match between steps 3 and 6.** `create_cistopic_object` defaults
+to `tag_cells=True`, which appends `___<project>` to every ATAC cell name, while
+the RNA AnnData keeps the plain barcode — so step 6 intersects two disjoint sets
+and dies with *"No cells found which are present in both assays"*, even though
+both sides came from the same Seurat object. Step 3 now passes
+`tag_cells=False`. A workspace whose `cistopic_obj.pkl` predates that fix has
+tagged names already; either re-run `--from 3` (redoes topic modeling) or set
+
+    scenicplus:
+      bc_transform_func: 'lambda x: x + "___scenicplus_run"'
+
+which re-runs step 6 onward only. The two must change together — the lambda is
+applied to the RNA barcodes to map them onto the ATAC ones, so it is wrong
+against an untagged cisTopic object. Step 6 prints both name shapes and the
+exact lambda when the intersection is empty.
 | 7 | genome_annot | `scplus_out/genome_annotation.tsv` | **needs network** (biomart) |
 | 8 | search_space | `scplus_out/search_space.tsv` | |
 | 9 | cistarget | `scplus_out/ctx_results.hdf5` | **needs ctx_db** |
