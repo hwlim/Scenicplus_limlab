@@ -59,16 +59,24 @@ done
 #fi
 #
 # ---- Preflight, INSIDE the job ----------------------------------------------
-# This was commented out while scenicplus_run_lsf_cchmc.sh skipped the
-# submit-side check on the stated grounds that "the driver still runs
-# scenicplus_check.sh inside the bsub'd shell". It did not. Between the two,
-# the CCHMC path ran no preflight at all, which is how an env whose
-# `scenicplus prepare_data` could not even import reached step 6.
+# Restored from a commented-out state. Two things were wrong and they are worth
+# keeping apart, because only the first explains the step-6 import failure:
 #
-# Here is also the RIGHT place for it, not just a place: it runs on the compute
-# node, after the modules and the conda env are in place, in the exact
-# environment the steps will use. A login-node check answers a different
-# question -- and on this cluster the two nodes do not even share a glibc.
+#   * scenicplus_check.sh was too weak. It imported top-level packages only, and
+#     `import pycistarget` reaches none of the chain that breaks. It PASSED on
+#     the broken env. That is the cause; see that file's header.
+#   * where it ran. scenicplus_run_lsf.sh runs it on the SUBMITTING host before
+#     bsub, against whatever python is active in that shell -- which need not be
+#     the env the job will use, and is a different OS image besides.
+#     scenicplus_run_lsf_cchmc.sh skipped it entirely on the stated grounds that
+#     "the driver still runs scenicplus_check.sh inside the bsub'd shell", which
+#     was not true while this call was commented out, so that path had none at
+#     all. A latent hole, not the one that fired here.
+#
+# Inside the job is the right place for both reasons: compute node, after the
+# modules and the conda env are in place, in the exact environment the steps
+# will use. On this cluster the login and compute nodes do not even share a
+# glibc, so a submit-side check answers a question nobody asked.
 if [[ "${SCENICPLUS_SKIP_CHECK:-0}" != "1" ]]; then
     "$SCENICPLUS_PATH/scripts/scenicplus_check.sh"
 fi
