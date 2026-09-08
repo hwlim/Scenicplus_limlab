@@ -10,6 +10,9 @@
 #   SCP_COPY=1  ./install_local.sh ...   # copy instead of hardlink (SMB/CIFS,
 #                                        # lustre, or anywhere hardlinks fail)
 #   SCP_FRESH=1 ./install_local.sh ...   # delete an existing prefix first
+#   SCP_CLEAN_PKGS=1 ./install_local.sh ...  # drop partially-extracted packages
+#                                        # from the cache (CondaVerificationError
+#                                        # "... appears to be corrupted")
 #
 # Re-running is safe: an existing env is updated in place, and phase 1 is
 # skipped when pybedtools 0.9.1 is already installed. An interrupted install
@@ -68,6 +71,26 @@ if [[ "${SCP_COPY:-0}" == "1" ]]; then
     export CONDA_ALWAYS_COPY=true          # conda / mamba
     COPY_ARGS=(--always-copy)              # micromamba
     echo "### SCP_COPY=1 -> copying instead of hardlinking (network filesystem mode)"
+fi
+
+# An interrupted install (killed job, filesystem hiccup) can leave PARTIALLY
+# EXTRACTED package directories in the cache. conda then verifies each against
+# its manifest and aborts with, e.g.
+#
+#   CondaVerificationError: The package for r-base located at
+#   <pkgs>/r-base-4.5.3-h502d0c9_3 appears to be corrupted. The path
+#   'share/man/man1/Rscript.1' specified in the package manifest cannot be found.
+#
+# The downloaded ARCHIVES are usually intact -- only the unpacked directories
+# are truncated. SCP_CLEAN_PKGS=1 removes the unpacked directories and keeps the
+# archives, so packages re-extract without re-downloading.
+if [[ "${SCP_CLEAN_PKGS:-0}" == "1" ]]; then
+    for d in ${CONDA_PKGS_DIRS//:/ }; do
+        [[ -d "$d" ]] || continue
+        n=$(find "$d" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+        echo "### SCP_CLEAN_PKGS=1 -> removing $n extracted package dir(s) from $d (archives kept)"
+        find "$d" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null || true
+    done
 fi
 
 echo "### phase 0: conda layer"
