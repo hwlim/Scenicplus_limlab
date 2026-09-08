@@ -330,11 +330,16 @@ def main() -> int:
 def _use_supplied_annotations(cfg: dict, out: dict) -> bool:
     """Copy user-provided annotation/chromsizes into place; True if handled.
 
-    `download_genome_annotations` needs Ensembl BioMart AND NCBI E-utilities.
-    Behind a proxy that gates either, there is no way through it -- hence the
-    escape hatch. Both files come out of one call, so both must be supplied
-    together; taking one from disk and the other from the network would still
-    need the network.
+    THIS IS THE NORMAL PATH FOR hg38/mm10, not an escape hatch.
+    `download_genome_annotations` derives chromosome sizes from an NCBI
+    E-utilities lookup against `db=genome`, and that database is RETIRED: it
+    answers HTTP 200 with <Count>0</Count> for every term, including plain
+    "Homo sapiens". Verified from two unrelated networks. So step 7 cannot
+    produce chromsizes for anyone until SCENIC+ changes that call.
+
+    Both files come out of one call, so both must be supplied together; taking
+    one from disk and the other from the network would still need the network
+    -- and the network half is what is broken.
     """
     inp = cfg.get("input", {})
     ann, chrom = inp.get("genome_annotation") or "", inp.get("chromsizes") or ""
@@ -403,23 +408,41 @@ def _check_chromsizes_shape(path) -> None:
 def _assert_genome_annot_complete(cfg: dict, out: dict) -> None:
     """download_genome_annotations exits 0 without writing chromsizes.
 
-    Its helper wraps the NCBI assembly-report lookup in a bare `except
-    Exception`, prints "Chromosome sizes will not be returned", and returns the
-    annotation alone; the CLI then logs "Chrosomome sizes was not found, please
-    provide this information manually" and exits 0. The stage's sentinel is
-    genome_annotation.tsv, which WAS written -- so the driver marks step 7 done
-    and step 8 is the first to notice, by which point re-running step 7 is both
-    skipped and futile. Fail here instead.
+    Its helper raises NCBISearchNotFound when the `db=genome` lookup returns no
+    Id, catches it, prints "Chromosome sizes will not be returned", and returns
+    the annotation alone; the CLI then logs "Chrosomome sizes was not found,
+    please provide this information manually" and exits 0. The stage's sentinel
+    is genome_annotation.tsv, which WAS written -- so the driver marks step 7
+    done and step 8 is the first to notice. Fail here instead.
+
+    THE SAME BRANCH ALSO SKIPS THE UCSC CONVERSION -- its message says so:
+    "without subestting for assembled chromosomes and converting to UCSC
+    style". So the annotation it just wrote names chromosomes 1, 2, X, MT while
+    the ATAC regions name them chr1, chr2. Both consequences are reported here,
+    because fixing only the visible one lands on the other at step 8.
     """
     if Path(out["chromsizes"]).is_file():
         _check_chromsizes_shape(out["chromsizes"])
         return
+
+    # Name the second consequence too. The annotation was written, so its
+    # naming can be read right now rather than discovered at step 8.
+    ann_note = ""
+    if _chrom_style(_tsv_chroms(out["genome_annotation"])) == "Ensembl":
+        ann_note = (
+            f"\n  AND the annotation it DID write is Ensembl-style (1, 2, X, MT),\n"
+            f"  because the UCSC conversion lives in the same branch that was\n"
+            f"  skipped. Against chr-prefixed ATAC regions it overlaps nothing and\n"
+            f"  step 8 dies in pandas. Convert it as well:\n"
+            f"    awk -F'\\t' 'BEGIN{{OFS=\"\\t\"}} NR==1{{print;next}}\n"
+            f"      {{if($1==\"MT\")$1=\"chrM\"; else if($1!~/^chr/)$1=\"chr\"$1; print}}' \\\n"
+            f"      {out['genome_annotation']} > annotation.ucsc.tsv")
     sys.exit(
         f"[grn_stage] the download exited 0 but wrote no {out['chromsizes']}.\n"
-        f"  That is its documented behaviour when the NCBI assembly-report\n"
-        f"  lookup fails (it catches every exception and returns the gene\n"
-        f"  annotation alone), so it will not succeed on a retry from behind\n"
-        f"  the same proxy. Supply the file instead -- in config.yaml:\n"
+        f"  It derives them from NCBI E-utilities `db=genome`, a RETIRED\n"
+        f"  database that answers 200 with <Count>0</Count> for every term.\n"
+        f"  A retry cannot succeed, here or anywhere. Supply the file instead\n"
+        f"  -- in config.yaml:\n"
         f"      input:\n"
         f"        genome_annotation: {out['genome_annotation']}\n"
         f"        chromsizes: /path/to/chromsizes.tsv\n"
@@ -428,7 +451,8 @@ def _assert_genome_annot_complete(cfg: dict, out: dict) -> None:
         f"    curl -O https://hgdownload.cse.ucsc.edu/goldenPath/hg38/bigZips/hg38.chrom.sizes\n"
         f"    awk 'BEGIN{{OFS=\"\\t\"; print \"Chromosome\",\"Start\",\"End\"}} "
         f"{{print $1,0,$2}}' \\\n"
-        f"        hg38.chrom.sizes > chromsizes.tsv")
+        f"        hg38.chrom.sizes > chromsizes.tsv"
+        + ann_note)
 
 
 def _chrom_style(names) -> str:

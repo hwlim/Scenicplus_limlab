@@ -35,23 +35,30 @@ input:
   assembly: "hg38"
   biomart_host: "http://www.ensembl.org"
 
-  # OPTIONAL — supply these instead of letting step 7 download them.
+  # For hg38/mm10 these are the NORMAL path, not a fallback.
   # Set BOTH or NEITHER: they come out of one call, so supplying one still
-  # needs the network for the other.
+  # needs the network for the other -- and the network half is what is broken.
   #
-  # Step 7 contacts Ensembl BioMart (gene annotation) AND NCBI E-utilities (the
-  # assembly report the chromosome sizes are derived from). Behind a proxy that
-  # gates either, it cannot succeed — and when the NCBI half fails it swallows
-  # the exception, writes the annotation, skips chromsizes and still EXITS 0.
-  # Step 7 now checks for the file, but an older workspace may already have a
-  # genome_annotation.tsv with no chromsizes beside it; that annotation is
-  # reusable here.
+  # Step 7 derives chromosome sizes from an NCBI E-utilities lookup against
+  # `db=genome`, and NCBI has RETIRED that database: it answers HTTP 200 with
+  # <Count>0</Count> for every term, including plain "Homo sapiens" (verified
+  # from two unrelated networks -- this is not a firewall). SCENIC+ swallows
+  # the miss, writes the annotation, skips chromsizes and EXITS 0.
+  #
+  # The same skipped branch performs the UCSC chromosome-name conversion, so a
+  # genome_annotation.tsv left by a failed step 7 is Ensembl-style (1, 2, X,
+  # MT) and overlaps nothing against chr-prefixed ATAC regions. It IS reusable
+  # here once converted -- see the second awk below.
   #
   # chromsizes.tsv is tab-separated WITH a header row: Chromosome, Start, End.
   # A raw UCSC .chrom.sizes has neither the header nor the Start column:
   #   curl -O https://hgdownload.cse.ucsc.edu/goldenPath/hg38/bigZips/hg38.chrom.sizes
   #   awk 'BEGIN{OFS="\t"; print "Chromosome","Start","End"} {print $1,0,$2}' \
   #       hg38.chrom.sizes > chromsizes.tsv
+  # And to convert an Ensembl-style annotation to UCSC naming:
+  #   awk -F'\t' 'BEGIN{OFS="\t"} NR==1{print;next}
+  #     {if($1=="MT")$1="chrM"; else if($1!~/^chr/)$1="chr"$1; print}' \
+  #     genome_annotation.tsv > genome_annotation.ucsc.tsv
   genome_annotation: ""
   chromsizes: ""
 

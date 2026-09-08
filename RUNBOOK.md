@@ -169,7 +169,7 @@ verified: editing `grn.tf_to_gene_importance_method` skipped 1–11 and re-ran
 | 4 | topic_modeling | `interim/cistopic_obj_with_topics.pkl` | **LDA, uses Ray.** Heaviest early step |
 | 5 | region_sets | `interim/region_sets/.done` | DARs + topic regions |
 | 6 | prepare_gex_acc | `scplus_out/ACC_GEX.h5mu` | first flattened GRN stage |
-| 7 | genome_annot | `scplus_out/genome_annotation.tsv` | **needs network** (biomart) |
+| 7 | genome_annot | `scplus_out/genome_annotation.tsv` | biomart; **chromsizes half is broken upstream** — see below |
 | 8 | search_space | `scplus_out/search_space.tsv` | |
 | 9 | cistarget | `scplus_out/ctx_results.hdf5` | **needs ctx_db** |
 | 10 | dem | `scplus_out/dem_results.hdf5` | **needs dem_db** |
@@ -217,6 +217,32 @@ least science per second saved is `n_topics: [10,20,30]` + `gsea_n_perm: 250` +
 a single quantile/top-n value. Put those in a separate analysis directory --
 changing them in place re-runs from whichever step reads them onward, and the
 `.cfgsha` cascade means step 4's list re-runs everything after it.
+
+**Step 7 cannot produce chromsizes, for anyone.** It derives them from an NCBI
+E-utilities lookup against `db=genome`, a database NCBI has retired: it answers
+HTTP 200 with `<Count>0</Count>` for every term, including plain
+`Homo sapiens`. Verified from two unrelated networks — this is not a firewall.
+SCENIC+ catches the miss, logs *"Chromosome sizes will not be returned"*, and
+**exits 0**, so the driver marks step 7 done.
+
+The same branch also performs the **UCSC chromosome-name conversion**, so the
+annotation it does write is Ensembl-style (`1`, `2`, `X`, `MT`) and will overlap
+nothing against `chr`-prefixed ATAC regions. One dead endpoint, two failures,
+two stages apart.
+
+Set `input.genome_annotation` and `input.chromsizes` (§3) and step 7 makes no
+network call at all. Build them once:
+
+    curl -O https://hgdownload.cse.ucsc.edu/goldenPath/hg38/bigZips/hg38.chrom.sizes
+    awk 'BEGIN{OFS="\t"; print "Chromosome","Start","End"} {print $1,0,$2}' \
+        hg38.chrom.sizes > chromsizes.tsv
+    # and convert the annotation biomart returned:
+    awk -F'\t' 'BEGIN{OFS="\t"} NR==1{print;next}
+      {if($1=="MT")$1="chrM"; else if($1!~/^chr/)$1="chr"$1; print}' \
+      genome_annotation.tsv > genome_annotation.ucsc.tsv
+
+Step 7 refuses if the two disagree in naming; step 8 reports all three sources
+if they still do.
 
 **Barcodes must match between steps 3 and 6.** `create_cistopic_object` defaults
 to `tag_cells=True`, which appends `___<project>` to every ATAC cell name, while
