@@ -48,8 +48,13 @@ mkdir -p "$LOG_DIR"
 
 # The submitting host probably doesn't have R loaded, so the standard
 # preflight (which does `Rscript -e ...`) would falsely fail. Skip by default;
-# the driver still runs scenicplus_check.sh inside the bsub'd shell after the
-# modules are loaded (unless SCENICPLUS_SKIP_CHECK=1).
+# the driver runs scenicplus_check.sh inside the bsub'd shell after the modules
+# are loaded (unless SCENICPLUS_SKIP_CHECK=1) -- the better place anyway, since
+# that is the environment the steps actually run in, on the node that runs them.
+#
+# This comment DESCRIBED THAT BEFORE IT WAS TRUE: the driver's call sat
+# commented out, so between this skip and that, the CCHMC path ran no preflight
+# at all. Verify both ends before trusting a delegation like this one.
 PRELUDE="module purge && module load anaconda3 && conda activate ${SCENICPLUS_ENV} && module load ${R_MODULE}"
 
 # Forward CLI flags to the driver inside the bsub.

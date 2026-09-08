@@ -58,9 +58,20 @@ done
 #    conda activate "$SCENICPLUS_ENV"
 #fi
 #
-# if [[ "${SCENICPLUS_SKIP_CHECK:-0}" != "1" ]]; then
-#     "$SCENICPLUS_PATH/scripts/scenicplus_check.sh"
-# fi
+# ---- Preflight, INSIDE the job ----------------------------------------------
+# This was commented out while scenicplus_run_lsf_cchmc.sh skipped the
+# submit-side check on the stated grounds that "the driver still runs
+# scenicplus_check.sh inside the bsub'd shell". It did not. Between the two,
+# the CCHMC path ran no preflight at all, which is how an env whose
+# `scenicplus prepare_data` could not even import reached step 6.
+#
+# Here is also the RIGHT place for it, not just a place: it runs on the compute
+# node, after the modules and the conda env are in place, in the exact
+# environment the steps will use. A login-node check answers a different
+# question -- and on this cluster the two nodes do not even share a glibc.
+if [[ "${SCENICPLUS_SKIP_CHECK:-0}" != "1" ]]; then
+    "$SCENICPLUS_PATH/scripts/scenicplus_check.sh"
+fi
 
 mkdir -p logs results tmp
 
