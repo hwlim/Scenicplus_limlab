@@ -57,6 +57,19 @@ Verify:
     /path/to/scenicplus_env/bin/scenicplus --help
     # usage: scenicplus [-h] {init_snakemake,prepare_data,grn_inference} ...
 
+**If that file does not exist**, pip installed scenicplus outside the prefix —
+on a shared cluster that means the user site (`~/.local/lib/python3.11/
+site-packages`, with the console script in `~/.local/bin`), because
+`~/.config/pip/pip.conf` carries `user = true` or `PIP_USER` is set. Repair
+without redoing the conda layer:
+
+    SCP_FROM=2 ./install_local.sh /path/to/scenicplus_env      # ~2 min
+
+The user site precedes the env's `site-packages` on `sys.path`, so a stale copy
+there also *shadows* the env at run time, silently. Export
+`PYTHONNOUSERSITE=1` alongside `PATH` whenever you run the pipeline — the
+installer prints it in its "To use" block for that reason.
+
 ---
 
 ## 2. cisTarget databases — 45.7 GB, needed from step 9 on
@@ -80,6 +93,7 @@ promoters, and SCENIC+ scores ATAC **regions**.
 
     export SCENICPLUS_PATH=/path/to/Scenicplus_limlab
     export PATH=$SCENICPLUS_PATH/scripts:/path/to/scenicplus_env/bin:$PATH
+    export PYTHONNOUSERSITE=1          # ~/.local wins over the env otherwise
 
     mkdir -p /path/to/analysis && cd /path/to/analysis
     scenicplus_init.sh                 # writes config/config.yaml

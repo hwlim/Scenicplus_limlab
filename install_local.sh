@@ -26,6 +26,15 @@
 # skipped when pybedtools 0.9.1 is already installed. An interrupted install
 # can simply be re-run.
 #
+# IF $ENV_PREFIX/bin/scenicplus IS MISSING after an otherwise clean run, pip
+# installed the package outside this prefix -- almost always the user site,
+# because ~/.config/pip/pip.conf says `user = true` or PIP_USER is set. Repair:
+#
+#   SCP_FROM=2 ./install_local.sh <prefix>      # pip layer only, ~2 min
+#
+# See the PIP_USER / PYTHONNOUSERSITE block below for why the import checks used
+# to pass anyway.
+#
 # Works with micromamba, mamba or conda -- whichever is found.
 #
 # WHY TWO PIP PHASES. scenicplus ships a fully-frozen pin set, and two of the
@@ -157,6 +166,27 @@ fi
 PY="$ENV_PREFIX/bin/python"
 [[ -x "$PY" ]] || { echo "ERROR: $PY missing after create" >&2; exit 1; }
 
+# pip must install INTO $ENV_PREFIX, never into the USER SITE
+# (~/.local/lib/pythonX.Y/site-packages). Two things send it there on a shared
+# cluster, and neither is loud:
+#
+#   * `user = true` in ~/.config/pip/pip.conf (or PIP_USER=1 in the
+#     environment) -- pip installs the package under ~/.local and puts the
+#     console scripts in ~/.local/bin. `import scenicplus` then works while
+#     $ENV_PREFIX/bin/scenicplus never appears;
+#   * a copy ALREADY in the user site -- pip reports "Requirement already
+#     satisfied" and installs nothing at all, with the same result.
+#
+# The user site sits BEFORE the env's site-packages on sys.path (measured, not
+# assumed), so imports resolve to it either way and every import-based check
+# passes on an env that does not actually contain the package. PIP_USER=0
+# overrides a pip.conf that says otherwise (measured: with `user = true` in the
+# config, `pip install six` landed in the user site; with PIP_USER=0 layered on
+# top, the same command landed in the env prefix). PYTHONNOUSERSITE=1 hides the
+# user site from both pip's already-satisfied check and our own verify.
+export PIP_USER=0
+export PYTHONNOUSERSITE=1
+
 # Conda's compilers are prefixed; fall back to the system ones if absent.
 for cc in "$ENV_PREFIX"/bin/*-cc; do [[ -x "$cc" ]] && export CC="$cc"; done
 for cxx in "$ENV_PREFIX"/bin/*-c++; do [[ -x "$cxx" ]] && export CXX="$cxx"; done
@@ -183,8 +213,12 @@ echo "### verify"
 # package -- `import scenicplus` from the parent dir "succeeds" with __file__
 # None and proves nothing.
 cd /
-"$PY" - <<'PY'
-import importlib.util as u
+# "importable" is NOT the same as "installed here": the module can resolve from
+# the user site or from PYTHONPATH, so each origin is checked against the
+# prefix. Without that, an install that went to ~/.local passes every line.
+SCP_PREFIX="$ENV_PREFIX" "$PY" - <<'PY'
+import importlib.util as u, os
+prefix = os.path.realpath(os.environ["SCP_PREFIX"]) + os.sep
 bad = 0
 for m in ("scenicplus", "pycistarget", "pycisTopic", "pybedtools",
           "anndata", "mudata", "snakemake", "yaml"):
@@ -192,11 +226,51 @@ for m in ("scenicplus", "pycistarget", "pycisTopic", "pybedtools",
     if s is None or s.origin is None:
         bad += 1
         print(f"  {m}: {'MISSING' if s is None else 'namespace-pkg (NOT a real install)'}")
+        continue
+    origin = os.path.realpath(s.origin)
+    if not origin.startswith(prefix):
+        bad += 1
+        print(f"  {m}: OUTSIDE THE ENV -> {origin}")
     else:
         print(f"  {m}: ok")
 raise SystemExit(1 if bad else 0)
 PY
 "$ENV_PREFIX/bin/Rscript" -e 'for (p in c("Seurat","Signac","Matrix","optparse")) cat(sprintf("  %-9s %s\n", p, as.character(packageVersion(p))))' 2>&1 | grep -v '^Loading'
+
+# The console script, and a repair when it is absent. scenicplus 1.0a2 declares
+#   [project.scripts] scenicplus = "scenicplus.cli.scenicplus:main"
+# so pip writes $ENV_PREFIX/bin/scenicplus whenever it installs the package into
+# this prefix. Absent means the install went somewhere else, or pip decided it
+# was already satisfied and wrote nothing. This is not cosmetic: every GRN stage
+# in scripts/scenicplus_06_grn_stage.py execs `scenicplus` as a command.
+if [[ ! -x "$ENV_PREFIX/bin/scenicplus" ]]; then
+    echo "### $ENV_PREFIX/bin/scenicplus missing -- reinstalling scenicplus alone"
+    echo "###   (--no-deps: the pinned dependency layer above must NOT be redone;"
+    echo "###    a plain --force-reinstall would try to rebuild pybedtools 0.9.1"
+    echo "###    WITH build isolation and fail)"
+    "$PY" -m pip install --force-reinstall --no-deps \
+        "scenicplus @ git+https://github.com/aertslab/scenicplus.git"
+fi
+if [[ ! -x "$ENV_PREFIX/bin/scenicplus" ]]; then
+    echo "ERROR: $ENV_PREFIX/bin/scenicplus is still missing after a forced" >&2
+    echo "       reinstall. pip put the package somewhere this prefix cannot see," >&2
+    echo "       or could not write to $ENV_PREFIX/bin. Diagnosis:" >&2
+    env -u PYTHONNOUSERSITE SCP_PREFIX="$ENV_PREFIX" "$PY" - >&2 <<'PY'
+import importlib.util as u, os, site, sys
+s = u.find_spec("scenicplus")
+print("       with the user site ENABLED, scenicplus resolves to:",
+      s.origin if s else "NOT FOUND")
+print("       user site:", site.getusersitepackages())
+print("       env  site:", os.path.join(os.environ["SCP_PREFIX"], "lib",
+                                        "python%d.%d" % sys.version_info[:2],
+                                        "site-packages"))
+PY
+    ls -d "$HOME"/.local/bin/scenicplus 2>/dev/null \
+        | sed 's/^/       console script landed here instead: /' >&2
+    echo "       Check for 'user = true' in ~/.config/pip/pip.conf and for" >&2
+    echo "       PIP_USER in the environment, then re-run with SCP_FROM=2." >&2
+    exit 1
+fi
 "$ENV_PREFIX/bin/scenicplus" --help | head -2
 
 cat <<EOF
@@ -205,4 +279,13 @@ cat <<EOF
     export SCENICPLUS_PATH=$HERE
     export PATH=\$SCENICPLUS_PATH/scripts:$ENV_PREFIX/bin:\$PATH
     export SCRNA_CONDA_ENV=$ENV_PREFIX     # scrna.tool.sh-style prefix
+    export PYTHONNOUSERSITE=1              # see below
+EOF
+
+cat >&2 <<'EOF'
+
+PYTHONNOUSERSITE=1 is not optional hygiene. ~/.local/lib/pythonX.Y/site-packages
+comes BEFORE the env's site-packages on sys.path, so any copy of scenicplus,
+pycisTopic or pycistarget left there by an earlier `pip install --user` silently
+WINS over the one in this env -- at run time, in every step, with no message.
 EOF
