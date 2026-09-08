@@ -12,21 +12,20 @@ A Seurat object with **RNA counts in `RNA`**, **ATAC counts in `peaks`**, and a
 **categorical cell-type column**. The pipeline will not start without the last
 one (`input.celltype_column`).
 
-Prepared test object:
+The object this runbook's timings and checks come from — a 10x PBMC multiome
+fixture (hg38), `5.integrated/seurat.rds` from a `scRNA_LimLab_Snake` run with
+SingleR/Monaco labels joined on as `cell_type`:
 
-    /home/ihlee/limlab_code/scenicplus-pbmc400/pbmc400_annotated.rds    115 MB
-
-    1149 cells · RNA 12210 genes · peaks 61490 · cell_type: 25 levels
+    115 MB · 1149 cells · RNA 12210 genes · peaks 61490 · cell_type 25 levels
     largest: Classical monocytes 243, Naive CD4 T 190, Naive CD8 T 143
 
-It is `pbmc-run-400/5.integrated/seurat.rds` (10x PBMC multiome fixture, hg38)
-with SingleR/Monaco labels joined on as `cell_type`. The source object was NOT
-modified — it belongs to a snakemake workspace whose timestamp contract would
-break if it were.
+The labels were joined onto a COPY; the source object was not modified, because
+it belongs to a snakemake workspace whose timestamp contract would break if it
+were.
 
-**Fragment paths are dangling and that is fine.** The object carries 4 Fragment
-objects pointing at `/home/ihlee/limlab_code/pbmc-fixture-400/...`, which will
-not exist elsewhere. **No step reads them** — verified by grep across every step
+**Fragment paths are dangling and that is fine.** The object carries Fragment
+objects pointing at paths recorded when it was built, which will not exist on
+another machine. **No step reads them** — verified by grep across every step
 script; `scenicplus_03_create_cistopic.py` says so in its own header, and
 step 01 reads only the `counts` layers. Copy the .rds alone.
 
@@ -170,6 +169,54 @@ verified: editing `grn.tf_to_gene_importance_method` skipped 1–11 and re-ran
 | 4 | topic_modeling | `interim/cistopic_obj_with_topics.pkl` | **LDA, uses Ray.** Heaviest early step |
 | 5 | region_sets | `interim/region_sets/.done` | DARs + topic regions |
 | 6 | prepare_gex_acc | `scplus_out/ACC_GEX.h5mu` | first flattened GRN stage |
+| 7 | genome_annot | `scplus_out/genome_annotation.tsv` | **needs network** (biomart) |
+| 8 | search_space | `scplus_out/search_space.tsv` | |
+| 9 | cistarget | `scplus_out/ctx_results.hdf5` | **needs ctx_db** |
+| 10 | dem | `scplus_out/dem_results.hdf5` | **needs dem_db** |
+| 11 | prepare_menr | `scplus_out/cistromes_direct.h5ad` | |
+| 12 | tf_to_gene | `scplus_out/tf_to_gene_adj.tsv` | |
+| 13 | region_to_gene | `scplus_out/region_to_gene_adj.tsv` | |
+| 14 | egrn_direct | `scplus_out/eRegulons_direct.tsv` | |
+| 15 | egrn_extended | `scplus_out/eRegulons_extended.tsv` | |
+| 16 | aucell_direct | `scplus_out/AUCell_direct.h5mu` | |
+| 17 | aucell_extended | `scplus_out/AUCell_extended.h5mu` | |
+| 18 | scplus_mudata | `scplus_out/scplusmdata.h5mu` | the GRN result |
+| 19 | postprocess_tsv | `tsv/eRegulons_combined.tsv` | |
+| 20 | visualize | `plots/01_umap_celltype.pdf` | |
+
+## 5b. Making a fresh run faster
+
+**Measure first.** Every step writes `logs/NN_*.log` and the driver prints a
+banner per step, so the real per-step wall clock is already on disk:
+
+    for f in logs/*.log; do
+      printf "%-28s %s -> %s\n" "$(basename "$f")" \
+        "$(head -1 "$f" | grep -oE '[0-9]{2}:[0-9]{2}:[0-9]{2}' | head -1)" \
+        "$(tail -5 "$f" | grep -oE '[0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -1)"
+    done
+
+Tune what that says is slow. The knobs below are ordered by expected leverage,
+but ONLY steps 1-3 have measured times in the table above; the rest is reasoning
+about what each parameter multiplies, not a benchmark.
+
+| knob | default | cheaper | what it costs you |
+|---|---|---|---|
+| `cistopic.n_topics` | `[2,5,10,20,30,40,50]` | `[10,20,30,40]` | step 4 runs one LDA per value, all at once (one CPU each). Wall clock is the SLOWEST model, so dropping the largest counts helps most; peak memory is the SUM, so it helps there too. Dropping the small ones saves memory, not time. |
+| `cistopic.n_iter` | 150 | 100 | Gibbs iterations, linear in step 4's time. Below ~100 the topic model may not have converged — fine for a plumbing test, not for results. |
+| `scenicplus.search_space_*` | `1000 150000` | `1000 75000` | halves the region-gene pairs steps 13-15 grind through. On the PBMC fixture 150 kb gave 185k links with a median distance of 53 kb, so 75 kb keeps most of the mass. Genuinely changes the biology: distal enhancers beyond the cut are invisible. |
+| `grn.gsea_n_perm` | 1000 | 250 | linear in steps 14-15. Coarsens the eRegulon p-values; use for a smoke run only. |
+| `grn.quantile_thresholds_region_to_gene` + `top_n_regionTogenes_per_gene` | 3 + 3 values | 1 + 1 | each combination is a separate region set to score downstream. Going from 3x3 to 1x1 cuts that work ~9x. |
+| `resources.n_cpu` | 16 | — | helps steps 9-13, which parallelise. See the step-4 memory note: there it is a MULTIPLIER on peak memory, not just on speed. |
+
+What will NOT get faster by tuning: **steps 9 and 10** read the 32.8 GB and
+12.9 GB cisTarget feathers, and that I/O dominates them. They are also
+sentinel-cached, so the cost is paid once per workspace, not per re-run.
+
+**For a plumbing test rather than a result**, the combination that changes the
+least science per second saved is `n_topics: [10,20,30]` + `gsea_n_perm: 250` +
+a single quantile/top-n value. Put those in a separate analysis directory --
+changing them in place re-runs from whichever step reads them onward, and the
+`.cfgsha` cascade means step 4's list re-runs everything after it.
 
 **Barcodes must match between steps 3 and 6.** `create_cistopic_object` defaults
 to `tag_cells=True`, which appends `___<project>` to every ATAC cell name, while
@@ -186,20 +233,6 @@ which re-runs step 6 onward only. The two must change together — the lambda is
 applied to the RNA barcodes to map them onto the ATAC ones, so it is wrong
 against an untagged cisTopic object. Step 6 prints both name shapes and the
 exact lambda when the intersection is empty.
-| 7 | genome_annot | `scplus_out/genome_annotation.tsv` | **needs network** (biomart) |
-| 8 | search_space | `scplus_out/search_space.tsv` | |
-| 9 | cistarget | `scplus_out/ctx_results.hdf5` | **needs ctx_db** |
-| 10 | dem | `scplus_out/dem_results.hdf5` | **needs dem_db** |
-| 11 | prepare_menr | `scplus_out/cistromes_direct.h5ad` | |
-| 12 | tf_to_gene | `scplus_out/tf_to_gene_adj.tsv` | |
-| 13 | region_to_gene | `scplus_out/region_to_gene_adj.tsv` | |
-| 14 | egrn_direct | `scplus_out/eRegulons_direct.tsv` | |
-| 15 | egrn_extended | `scplus_out/eRegulons_extended.tsv` | |
-| 16 | aucell_direct | `scplus_out/AUCell_direct.h5mu` | |
-| 17 | aucell_extended | `scplus_out/AUCell_extended.h5mu` | |
-| 18 | scplus_mudata | `scplus_out/scplusmdata.h5mu` | the GRN result |
-| 19 | postprocess_tsv | `tsv/eRegulons_combined.tsv` | |
-| 20 | visualize | `plots/01_umap_celltype.pdf` | |
 
 Steps 6–18 replace what used to be one opaque inner `snakemake` call. Each is
 now a direct `scenicplus` CLI invocation with its own sentinel and config hash.
