@@ -321,6 +321,8 @@ def main() -> int:
         # snippet themselves at the worst moment.
         if args.stage == "prepare_gex_acc":
             _diagnose_barcodes(args, cfg)
+        if args.stage == "search_space":
+            _diagnose_chrom_style(out)
         raise
     return 0
 
@@ -351,11 +353,27 @@ def _use_supplied_annotations(cfg: dict, out: dict) -> bool:
     for key, src, _ in pairs:
         if not Path(src).expanduser().is_file():
             sys.exit(f"[grn_stage] input.{key} = {src!r} does not exist")
+    # Validate the SOURCES before copying anything, for the same reason the
+    # existence check above runs first: a refusal must not leave half the
+    # stage's outputs behind.
+    _check_chromsizes_shape(Path(chrom).expanduser())
+    # Catch a naming mismatch HERE rather than let step 8 hit an empty overlap
+    # and report it as a pandas KeyError. Only the two supplied files can be
+    # compared at this point; the regions join in at step 8.
+    a_sty = _chrom_style(_tsv_chroms(Path(ann).expanduser()))
+    c_sty = _chrom_style(_tsv_chroms(Path(chrom).expanduser()))
+    if a_sty != c_sty and "empty" not in (a_sty, c_sty):
+        sys.exit(f"[grn_stage] chromosome naming disagrees between the two files:\n"
+                 f"    genome_annotation  {a_sty}\n"
+                 f"    chromsizes         {c_sty}\n"
+                 f"  search_space joins them per chromosome, so nothing would "
+                 f"overlap.\n  Both must also match the ATAC region names "
+                 f"(chr1:... vs 1:...).")
+    print(f"[grn_stage] chromosome naming: {a_sty} in both files", flush=True)
     for key, src, dst in pairs:
         p = Path(src).expanduser()
         shutil.copyfile(p, dst)
         print(f"[grn_stage] input.{key}: {p} -> {dst}", flush=True)
-    _check_chromsizes_shape(out["chromsizes"])
     return True
 
 
@@ -411,6 +429,92 @@ def _assert_genome_annot_complete(cfg: dict, out: dict) -> None:
         f"    awk 'BEGIN{{OFS=\"\\t\"; print \"Chromosome\",\"Start\",\"End\"}} "
         f"{{print $1,0,$2}}' \\\n"
         f"        hg38.chrom.sizes > chromsizes.tsv")
+
+
+def _chrom_style(names) -> str:
+    """UCSC ('chr1') vs Ensembl ('1') vs mixed, from a sample of names."""
+    names = [str(n) for n in names if str(n)]
+    if not names:
+        return "empty"
+    pref = sum(n.startswith("chr") for n in names)
+    if pref == len(names):
+        return "UCSC"
+    if pref == 0:
+        return "Ensembl"
+    return f"mixed ({pref}/{len(names)} chr-prefixed)"
+
+
+def _tsv_chroms(path, limit: int = 200) -> list:
+    """First column's values from a header'd TSV, minus the header."""
+    try:
+        with open(path) as fh:
+            rows = [next(fh) for _ in range(limit)]
+    except StopIteration:
+        with open(path) as fh:
+            rows = fh.readlines()
+    except OSError:
+        return []
+    return [r.split("\t")[0].strip() for r in rows[1:] if r.strip()]
+
+
+def _mudata_region_chroms(path, limit: int = 200) -> list:
+    """scATAC region names out of an .h5mu without loading it.
+
+    mudata.read() pulls the whole object into memory for what is a handful of
+    strings; h5py reads the index directly.
+    """
+    try:
+        import h5py
+        with h5py.File(path, "r") as fh:
+            idx = fh["mod"]["scATAC"]["var"]["_index"][:limit]
+        return [b.decode() if isinstance(b, bytes) else str(b) for b in idx]
+    except Exception:
+        return []
+
+
+def _diagnose_chrom_style(out) -> None:
+    """search_space joins three files by chromosome; say if they disagree.
+
+    pyranges joins per chromosome, so an annotation naming chromosomes "1"
+    against regions naming them "chr1" overlaps NOTHING. The empty PyRanges
+    then has a DataFrame with no columns at all, and SCENIC+ dies on
+
+        KeyError: "None of [Index(['Chromosome', 'Start', 'End'])] are in the [columns]"
+
+    which points at pandas and says nothing about chromosome names.
+    """
+    ann = _tsv_chroms(out["genome_annotation"])
+    chrom = _tsv_chroms(out["chromsizes"])
+    regions = [r.split(":")[0].split("-")[0] for r in
+               _mudata_region_chroms(out["combined_GEX_ACC_mudata"])]
+    print("\n[grn_stage] chromosome naming, the three inputs this joins:", file=sys.stderr)
+    for label, vals in (("gene annotation", ann), ("chromsizes", chrom),
+                        ("ATAC regions", regions)):
+        style = _chrom_style(vals)
+        eg = ", ".join(sorted(set(vals))[:3]) if vals else "-"
+        print(f"[grn_stage]   {label:<16} {style:<10} e.g. {eg}", file=sys.stderr)
+    styles = {_chrom_style(v) for v in (ann, chrom, regions) if v}
+    if len(styles) <= 1:
+        print("[grn_stage]   all three agree -- the empty overlap is elsewhere "
+              "(coordinates, or no shared genes).", file=sys.stderr)
+        return
+    print("[grn_stage]   THEY DISAGREE, so no region can overlap any gene.",
+          file=sys.stderr)
+    if _chrom_style(ann) == "Ensembl":
+        print("[grn_stage]   The gene annotation is Ensembl-style. That is what a",
+              file=sys.stderr)
+        print("[grn_stage]   step 7 whose NCBI lookup failed leaves behind: the UCSC",
+              file=sys.stderr)
+        print("[grn_stage]   conversion happens in the SAME branch that produces",
+              file=sys.stderr)
+        print("[grn_stage]   chromsizes, so losing one loses the other. Convert:",
+              file=sys.stderr)
+        print("[grn_stage]     awk -F'\\t' 'BEGIN{OFS=\"\\t\"} NR==1{print;next}",
+              file=sys.stderr)
+        print("[grn_stage]       {if($1==\"MT\")$1=\"chrM\"; else if($1!~/^chr/)$1=\"chr\"$1; print}' \\",
+              file=sys.stderr)
+        print(f"[grn_stage]       {out['genome_annotation']} > annotation.ucsc.tsv",
+              file=sys.stderr)
 
 
 def _diagnose_barcodes(args, cfg) -> None:
