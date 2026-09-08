@@ -105,6 +105,13 @@ else
 import importlib, sys
 
 # Plain packages: cheap, and a missing one is unambiguous.
+#
+# THE ORDER MATTERS AND MUST NOT BE "TIDIED". pandas/pyranges/anndata/mudata
+# each load libstdc++.so.6 through a manylinux wheel that falls through to the
+# system copy, and a soname loaded once is never searched for again. Importing
+# them BEFORE sqlite3 is what reproduces the pipeline's real load order -- check
+# sqlite3 first and it resolves through its own RPATH, passes, and tells you
+# nothing.
 packages = [
     "yaml", "numpy", "pandas", "scipy", "matplotlib", "networkx",
     "pyranges", "scanpy", "anndata", "mudata",
@@ -135,6 +142,30 @@ if bad:
     sys.exit(1)
 print(f"[preflight] python: {len(packages)} package(s) + {len(submodules)} "
       f"submodule chain(s) OK")
+
+# WHICH libstdc++ won. The file existing in the env is not the question; which
+# one this process actually loaded is, and on a mixed conda+wheel env they
+# differ. Reported on success too, so a run that works on one node class and
+# not another has the evidence in its own log.
+try:
+    with open("/proc/self/maps") as fh:
+        live = sorted({l.split()[-1] for l in fh
+                       if "libstdc++.so.6" in l and l.split()[-1].startswith("/")})
+    for path in live:
+        where = "env" if path.startswith(sys.prefix) else "SYSTEM"
+        print(f"[preflight] libstdc++ in use: {path}  [{where}]")
+    if any(not p.startswith(sys.prefix) for p in live):
+        sys.stdout.flush()          # else the NOTE lands above the line it is about
+        print("[preflight] NOTE: a libstdc++ from outside the env is loaded. It works",
+              file=sys.stderr)
+        print("[preflight]   here, but on a host whose system libstdc++ predates",
+              file=sys.stderr)
+        print("[preflight]   CXXABI_1.3.15 the ICU that conda's sqlite3 needs will fail",
+              file=sys.stderr)
+        print(f"[preflight]   against it. Fix: LD_LIBRARY_PATH={sys.prefix}/lib:$LD_LIBRARY_PATH",
+              file=sys.stderr)
+except OSError:
+    pass                                    # /proc absent: not worth failing on
 PY
 fi
 

@@ -58,6 +58,41 @@ done
 #    conda activate "$SCENICPLUS_ENV"
 #fi
 #
+# ---- Make the env's C++ runtime win the race --------------------------------
+# MEASURED, not guessed. `python -c "import sqlite3"` alone resolves
+# libstdc++.so.6 to the env's copy through _sqlite3's DT_RPATH ($ORIGIN/../..).
+# But `import pandas` first does this:
+#
+#     trying file=<prefix>/lib/python3.11/site-packages/pyarrow/libstdc++.so.6
+#     trying file=/lib/x86_64-linux-gnu/libstdc++.so.6
+#     calling init: /lib/x86_64-linux-gnu/libstdc++.so.6
+#
+# pyarrow is a manylinux WHEEL: DT_RUNPATH $ORIGIN, no libstdc++ beside it, and
+# RUNPATH is not inherited -- so it falls through to ld.so.cache and loads the
+# SYSTEM one. There is then exactly ONE libstdc++ search in the whole process
+# (counted: 1), because a soname already loaded is never looked up again. Every
+# later library gets that system copy, including conda's ICU, which needs
+# CXXABI_1.3.15. On a node whose /lib64 predates GCC 13:
+#
+#     ImportError: /lib64/libstdc++.so.6: version `CXXABI_1.3.15' not found
+#       (required by <prefix>/lib/.../libicui18n.so.78)
+#
+# pandas, pyranges, anndata and mudata all pull it in first; nothing in steps
+# 1-5 then asks for a new-enough ABI, which is why this surfaced at step 6.
+#
+# Prepending the env's lib makes the FIRST load resolve inside the env, and the
+# rest follow. It cannot disturb anything that has DT_RPATH -- RPATH is searched
+# before LD_LIBRARY_PATH -- so this only redirects the fallback that is escaping
+# today. Verified: with it set, `import pandas, pyranges, anndata, mudata,
+# sqlite3` loads the env's libstdc++ and succeeds.
+if command -v python >/dev/null 2>&1; then
+    _SCP_PREFIX="$(python -c 'import sys; print(sys.prefix)' 2>/dev/null || true)"
+    if [[ -n "${_SCP_PREFIX:-}" && -d "$_SCP_PREFIX/lib" ]]; then
+        export LD_LIBRARY_PATH="$_SCP_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        echo "[scenicplus_run_pipeline] LD_LIBRARY_PATH -> $_SCP_PREFIX/lib (see comment above)"
+    fi
+fi
+
 # ---- Preflight, INSIDE the job ----------------------------------------------
 # Restored from a commented-out state. Two things were wrong and they are worth
 # keeping apart, because only the first explains the step-6 import failure:

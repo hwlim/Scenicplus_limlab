@@ -80,6 +80,15 @@ there also *shadows* the env at run time, silently. Export
 `PYTHONNOUSERSITE=1` alongside `PATH` whenever you run the pipeline — the
 installer prints it in its "To use" block for that reason.
 
+`LD_LIBRARY_PATH` is the same shape of problem one layer down. `pandas`,
+`pyranges`, `anndata` and `mudata` reach libstdc++ through manylinux **wheels**
+whose `DT_RUNPATH` does not find the env's copy, so they load the **system**
+one — and a soname loaded once is never searched for again, so conda's ICU
+(which needs `CXXABI_1.3.15`) then fails against it on any node whose `/lib64`
+predates GCC 13. Prepending the env's `lib` makes the first load resolve inside
+the env. `scenicplus_run_pipeline.sh` sets this itself; export it too when
+running steps by hand.
+
 ---
 
 ## 2. cisTarget databases — 45.7 GB, needed from step 9 on
@@ -104,6 +113,7 @@ promoters, and SCENIC+ scores ATAC **regions**.
     export SCENICPLUS_PATH=/path/to/Scenicplus_limlab
     export PATH=$SCENICPLUS_PATH/scripts:/path/to/scenicplus_env/bin:$PATH
     export PYTHONNOUSERSITE=1          # ~/.local wins over the env otherwise
+    export LD_LIBRARY_PATH=/path/to/scenicplus_env/lib:$LD_LIBRARY_PATH
 
     mkdir -p /path/to/analysis && cd /path/to/analysis
     scenicplus_init.sh                 # writes config/config.yaml
