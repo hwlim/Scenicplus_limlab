@@ -301,7 +301,7 @@ run_step 6 prepare_gex_acc \
     "
 
 run_step 7 genome_annot \
-    "input.species,input.biomart_host" \
+    "input.species,input.biomart_host,input.genome_annotation,input.chromsizes" \
     "$S07" "
         python '$GRN_STAGE' --stage genome_annot \
             --config '$CONFIG' --scplus_out '$SCPLUS_OUT' \

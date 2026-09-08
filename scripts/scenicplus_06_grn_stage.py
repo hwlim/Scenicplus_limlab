@@ -23,6 +23,7 @@ Stages (in dependency order):
     aucell_direct  aucell_extended  scplus_mudata
 """
 import argparse
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -301,10 +302,17 @@ def main() -> int:
     scplus_out.mkdir(parents=True, exist_ok=True)
     out = out_paths(scplus_out)
 
+    # genome_annot is the one stage that can be satisfied from disk, and the one
+    # that lies about having succeeded. Handled before dispatch.
+    if args.stage == "genome_annot" and _use_supplied_annotations(cfg, out):
+        return 0
+
     argv = build_argv(args.stage, cfg, out, args)
     print("[grn_stage] " + " ".join(argv), flush=True)
     try:
         subprocess.run(argv, check=True)
+        if args.stage == "genome_annot":
+            _assert_genome_annot_complete(cfg, out)
     except subprocess.CalledProcessError:
         # prepare_GEX_ACC fails with "No cells found which are present in both
         # assays, check input and consider using `bc_transform_func`" and does
@@ -315,6 +323,94 @@ def main() -> int:
             _diagnose_barcodes(args, cfg)
         raise
     return 0
+
+
+def _use_supplied_annotations(cfg: dict, out: dict) -> bool:
+    """Copy user-provided annotation/chromsizes into place; True if handled.
+
+    `download_genome_annotations` needs Ensembl BioMart AND NCBI E-utilities.
+    Behind a proxy that gates either, there is no way through it -- hence the
+    escape hatch. Both files come out of one call, so both must be supplied
+    together; taking one from disk and the other from the network would still
+    need the network.
+    """
+    inp = cfg.get("input", {})
+    ann, chrom = inp.get("genome_annotation") or "", inp.get("chromsizes") or ""
+    if not ann and not chrom:
+        return False
+    if bool(ann) != bool(chrom):
+        have, miss = ("genome_annotation", "chromsizes") if ann else ("chromsizes", "genome_annotation")
+        sys.exit(f"[grn_stage] input.{have} is set but input.{miss} is not. Both "
+                 f"come from one download, so supplying one still requires the "
+                 f"network for the other -- set both, or neither.")
+    pairs = (("genome_annotation", ann, out["genome_annotation"]),
+             ("chromsizes", chrom, out["chromsizes"]))
+    # Validate BOTH before copying EITHER: copying the first and then failing on
+    # the second leaves half the stage's outputs in place, which the next run
+    # has no way to tell from a good one.
+    for key, src, _ in pairs:
+        if not Path(src).expanduser().is_file():
+            sys.exit(f"[grn_stage] input.{key} = {src!r} does not exist")
+    for key, src, dst in pairs:
+        p = Path(src).expanduser()
+        shutil.copyfile(p, dst)
+        print(f"[grn_stage] input.{key}: {p} -> {dst}", flush=True)
+    _check_chromsizes_shape(out["chromsizes"])
+    return True
+
+
+def _check_chromsizes_shape(path) -> None:
+    """A hand-made chromsizes file is easy to get subtly wrong; say so here.
+
+    search_space reads it with pd.read_table, so it is TAB-separated WITH a
+    header row and needs the columns SCENIC+ writes: Chromosome, Start, End.
+    A UCSC .chrom.sizes file has neither the header nor the Start column, and
+    pandas will happily read it as a two-column frame whose header is the first
+    chromosome -- which fails much later, inside get_search_space.
+    """
+    try:
+        first = Path(path).read_text().splitlines()[0].split("\t")
+    except (OSError, IndexError) as e:
+        sys.exit(f"[grn_stage] cannot read chromsizes {path}: {e}")
+    need = ["Chromosome", "Start", "End"]
+    if first[:3] != need:
+        sys.exit(
+            f"[grn_stage] {path} has header {first!r}, expected {need!r}.\n"
+            f"  It is read with pandas.read_table, so it needs a TAB-separated\n"
+            f"  header row. A raw UCSC .chrom.sizes converts with:\n"
+            f"    awk 'BEGIN{{OFS=\"\\t\"; print \"Chromosome\",\"Start\",\"End\"}} "
+            f"{{print $1,0,$2}}' hg38.chrom.sizes > chromsizes.tsv")
+
+
+def _assert_genome_annot_complete(cfg: dict, out: dict) -> None:
+    """download_genome_annotations exits 0 without writing chromsizes.
+
+    Its helper wraps the NCBI assembly-report lookup in a bare `except
+    Exception`, prints "Chromosome sizes will not be returned", and returns the
+    annotation alone; the CLI then logs "Chrosomome sizes was not found, please
+    provide this information manually" and exits 0. The stage's sentinel is
+    genome_annotation.tsv, which WAS written -- so the driver marks step 7 done
+    and step 8 is the first to notice, by which point re-running step 7 is both
+    skipped and futile. Fail here instead.
+    """
+    if Path(out["chromsizes"]).is_file():
+        _check_chromsizes_shape(out["chromsizes"])
+        return
+    sys.exit(
+        f"[grn_stage] the download exited 0 but wrote no {out['chromsizes']}.\n"
+        f"  That is its documented behaviour when the NCBI assembly-report\n"
+        f"  lookup fails (it catches every exception and returns the gene\n"
+        f"  annotation alone), so it will not succeed on a retry from behind\n"
+        f"  the same proxy. Supply the file instead -- in config.yaml:\n"
+        f"      input:\n"
+        f"        genome_annotation: {out['genome_annotation']}\n"
+        f"        chromsizes: /path/to/chromsizes.tsv\n"
+        f"  The genome annotation above was written and is reusable. To build\n"
+        f"  chromsizes for hg38:\n"
+        f"    curl -O https://hgdownload.cse.ucsc.edu/goldenPath/hg38/bigZips/hg38.chrom.sizes\n"
+        f"    awk 'BEGIN{{OFS=\"\\t\"; print \"Chromosome\",\"Start\",\"End\"}} "
+        f"{{print $1,0,$2}}' \\\n"
+        f"        hg38.chrom.sizes > chromsizes.tsv")
 
 
 def _diagnose_barcodes(args, cfg) -> None:
