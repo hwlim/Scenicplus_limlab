@@ -446,7 +446,7 @@ Updated 2026-09-09.
 | step 4, local | **blocked by the sandbox** (Ray's plasma socket); never attempted locally since |
 | **mouse / mm10** | **run to completion 2026-09-09**, reported by the operator; the artifacts have not been examined here. It is what turned up the `input.reduction` defect below |
 | `input.reduction` | **confirmed on the cluster 2026-09-09**: a named reduction produces the figure it names. The `--only 20` redraw of a finished run is the exercised path |
-| submission | every cluster run has used `scenicplus_run_lsf.sh`, driven by a per-workspace `run.sh` (Quickstart G). `scenicplus_run_lsf_cchmc.sh` has never been the path in use |
+| submission | every cluster run has used `scenicplus_run_lsf.sh`, driven by a per-workspace `run.sh` ([quickstart.md](quickstart.md) section F). `scenicplus_run_lsf_cchmc.sh` has never been the path in use |
 | driver sentinel/cascade logic | validated by simulation, then in practice — a `grn.*` edit re-ran 12–20 and skipped 1–11 |
 
 **Outputs that have been looked at,** as opposed to merely produced:
