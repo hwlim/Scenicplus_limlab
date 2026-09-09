@@ -115,6 +115,63 @@ promoters, and SCENIC+ scores ATAC **regions**.
 
 ---
 
+## 2b. Mouse (mm10) — the assembly will not take care of itself
+
+Everything above assumes human/hg38. Mouse needs four things changed, and one of
+them is a trap that does **not** announce itself.
+
+**The trap.** Step 7 asks Ensembl what assembly it is working with and gets
+whatever Ensembl serves *today*, which for mouse is **GRCm39**. Against mm10 /
+GRCm38 data that is the wrong assembly — and unlike the missing chromsizes, it
+does not stop anything. Chromosome names still convert, the search space still
+builds, and the peak–gene links come out quietly wrong. From a 2026-05 kidney
+run (`Development.md:35`):
+
+    Download gene annotation INFO   Using genome: GRCm39
+    Could not find Id on ...esearch.fcgi?db=genome&term=GRCm39
+
+Both halves of that line are problems. The second is the dead endpoint (§6); the
+first is the one that would have survived to the results.
+
+**So build the genome files yourself.** `scripts/scenicplus_make_genome_files.R`
+derives both from a pinned EnsDb, so the assembly is the one you chose rather
+than the one Ensembl currently ships:
+
+    # in the scRNA_LimLab_Snake env — it needs EnsDb + BSgenome, which
+    # environment.cchmc.yml deliberately does not carry
+    Rscript $SCENICPLUS_PATH/scripts/scenicplus_make_genome_files.R \
+        --species mouse --out-dir /path/to/genome
+
+It prints `chr1 = 195,471,971 bp` for mm10. That single number is the check:
+GRCm39's chr1 is 195,154,279. If you ever wonder which assembly a run used, look
+there.
+
+Deriving it from `EnsDb.Mmusculus.v79` — the same annotation
+`scRNA_LimLab_Snake` used to build the peaks — means the peaks and the
+annotation share an assembly *by construction* rather than by two services
+happening to agree.
+
+**The four config changes:**
+
+| key | mouse value |
+|---|---|
+| `input.species` | `"mmusculus"` |
+| `input.genome_annotation` / `input.chromsizes` | the two files just built |
+| `input.ctx_db` / `input.dem_db` | `.../mus_musculus/mm10/...` |
+| `input.motif_annotations` | `motifs-v10nr_clust-nr.mgi-m0.001-o0.0.tbl` (mgi, not hgnc) |
+
+`input.assembly` is **dead config** — no script reads it; setting `mm10` there
+changes nothing.
+
+**One key, two vocabularies.** `input.species` feeds step 7 (which wants the
+Ensembl short form `mmusculus`) *and* steps 9–10 (which want
+`mus_musculus`). They disagree, and it works only because `load_motif_annotations`
+consults the species **solely when no annotation file is given**
+(`pycistarget/utils.py:98`). Since `input.motif_annotations` is always set here,
+the steps 9–10 spelling is inert. Leave that path unset and it fails.
+
+---
+
 ## 3. Configure
 
     export SCENICPLUS_PATH=/path/to/Scenicplus_limlab
