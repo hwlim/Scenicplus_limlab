@@ -189,6 +189,7 @@ Edit `config/config.yaml`:
 | `input.seurat_rds` | absolute path to your .rds |
 | `input.celltype_column` | `cell_type` |
 | `input.celltype_scope` | `[]` for all cells, or a subset of cell types |
+| `input.reduction` | the Seurat reduction every figure is drawn on, e.g. `wnn.umap`. Empty means one is computed, unintegrated |
 | `input.species` | `hsapiens` |
 | `input.ctx_db` / `input.dem_db` | the two feather files |
 | `input.motif_annotations` | the .tbl |
@@ -200,6 +201,33 @@ pipeline's config cannot be fed in by accident.
 **`input.assembly` is dead config** — no script reads it (grep across `scripts/`
 returns nothing). Setting `mm10` there does NOT switch species; use
 `input.species`.
+
+**Set `input.reduction` on an integrated object.** Steps 01, 02 and 20 read it,
+and it names the reduction that becomes `X_umap`: the layout the cell-type
+figure and every per-eRegulon figure are drawn on. Give the name exactly as
+`Reductions(obj)` prints it. A name the object does not have fails at step 01,
+in the first minute, with the available names listed.
+
+Leaving it empty is a choice, not a default. Nothing then supplies a layout, so
+step 02 computes a UMAP from the RNA matrix with no batch correction and step 20
+falls back to a UMAP of eRegulon activity. Both are defensible for one sample;
+for a multi-sample integrated object neither is the picture you looked at in
+Seurat, and the figure does not say which one it is. Every figure now carries
+the layout's name in its title, so this can be read off the output rather than
+the log.
+
+The prefix rule this replaced matched none of Seurat's actual reduction names —
+`wnn.umap`, `rna.umap`, `umap.harmony` all fell through — so every run so far
+plotted a recomputed unintegrated layout. Grep any past run for the line that
+records it:
+
+    grep -h 'X_umap\|No UMAP' logs/02_build_anndata.log
+
+**This affects figures only.** No part of the GRN inference reads a reduction:
+with `scenicplus.is_multiome: true` cells are paired by barcode rather than
+through metacells, topics come from the fragment counts, and DARs and RSS come
+from `celltype_column`. A finished run therefore does not need recomputing — see
+§5b for redrawing its figures alone.
 
 ---
 
@@ -276,6 +304,19 @@ about what each parameter multiplies, not a benchmark.
 What will NOT get faster by tuning: **steps 9 and 10** read the 32.8 GB and
 12.9 GB cisTarget feathers, and that I/O dominates them. They are also
 sentinel-cached, so the cost is paid once per workspace, not per re-run.
+
+**Redrawing the figures of a finished run costs one step.** Setting
+`input.reduction` changes the `.cfgsha` of steps 1, 2 and 20, and once step 1
+runs the cascade forces all twenty — which is the right default, but pointless
+here, since no stage between them reads a reduction. Step 20 reads the layout
+straight out of step 01's `seurat_export/embedding_<name>.tsv`, which a finished
+workspace already has for every reduction the object carried:
+
+    # set input.reduction first, then
+    scenicplus_run_pipeline.sh --only 20
+
+`--only` bypasses the cascade, so this touches nothing but `results/plots/`.
+Check the new titles: each figure names the layout it was drawn on.
 
 **For a plumbing test rather than a result**, the combination that changes the
 least science per second saved is `n_topics: [10,20,30]` + `gsea_n_perm: 250` +
@@ -383,7 +424,7 @@ Updated 2026-09-08.
 | — second pass | **from scratch on the current code**, stopping once at step 7 to build the genome files, which were supplied through `input.genome_annotation` / `input.chromsizes` |
 | steps 1–3, local WSL workstation | run on the PBMC-400 fixture |
 | step 4, local | **blocked by the sandbox** (Ray's plasma socket); never attempted locally since |
-| **mouse / mm10** | **never run.** `scenicplus_make_genome_files.R` is verified (see below); no mouse object has met step 1 |
+| **mouse / mm10** | **run to completion 2026-09-09**, reported by the operator; the artifacts have not been examined here. It is what turned up the `input.reduction` defect below |
 | driver sentinel/cascade logic | validated by simulation, then in practice — a `grn.*` edit re-ran 12–20 and skipped 1–11 |
 
 **Outputs that have been looked at,** as opposed to merely produced:
@@ -403,7 +444,7 @@ identical lengths.
 
 It said to treat the first cluster run as the real test, because every component
 that actually ran turned up a defect the static checks missed. It did — **eight
-failures that stopped a run**, and a ninth found only by looking at an output:
+failures that stopped a run**, and two more found only by looking at an output:
 
 | # | stopped at | the two things that had to agree |
 |---|---|---|
@@ -416,6 +457,7 @@ failures that stopped a run**, and a ninth found only by looking at an output:
 | 7 | step 8 `KeyError` | Ensembl vs UCSC chromosome names |
 | 8 | step 20 `savefig` | matplotlib's API vs plotnine's |
 | 9 | *nothing* | a 301-megapixel figure, found by opening it |
+| 10 | *nothing* | Seurat's reduction NAMES vs the `umap` prefix step 2 tested for |
 
 Every one named neither side. All are now fixed at the source with a check that
 says which disagreed.

@@ -30,6 +30,25 @@ input:
   #   celltype_scope: ["Purkinje", "Granule", "MLI1", "MLI2"]
   celltype_scope: []
 
+  # Which Seurat reduction supplies the layout every figure is drawn on.
+  # Give the name exactly as `Reductions(obj)` prints it: "wnn.umap",
+  # "rna.umap", "umap.harmony", and so on.
+  #
+  # LEAVING THIS EMPTY IS A CHOICE, NOT A DEFAULT. With no name, step 02
+  # computes a UMAP from the RNA matrix with no batch correction, and step 20
+  # draws on a UMAP of eRegulon activity. Both are honest layouts for one
+  # sample. For a multi-sample INTEGRATED object neither is the picture you
+  # looked at in Seurat, and nothing about the resulting figure says so.
+  #
+  # Every reduction is exported regardless, as obsm["X_<name>"]; this key only
+  # decides which one becomes X_umap. A name the object does not have fails at
+  # step 01, before anything is computed.
+  #
+  # Plots only. No part of the GRN inference reads a reduction: with
+  # `scenicplus.is_multiome: true` cells are paired by barcode, topics come
+  # from the fragment counts, and DARs and RSS come from celltype_column.
+  reduction: ""
+
   # Genome assembly + species; used by SCENIC+ to fetch genome annotation from Biomart.
   species: "hsapiens"            # one of: hsapiens, mmusculus, dmelanogaster, ggallus
   assembly: "hg38"

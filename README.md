@@ -174,14 +174,22 @@ config cannot be fed in by accident.
    - `RNA` assay containing **normalized** expression in `data` and raw counts in `counts`,
    - `peaks` assay containing peak counts (regions named `chr-start-end` or `chr:start-end`),
    - cell-type column (`input.celltype_column`) in `@meta.data`.
-   - (optional) UMAP/PCA reductions — these are reused if present.
-2. `input.celltype_scope` (optional) — a list of cell-type values from
+   - (optional) UMAP/PCA reductions — every one is exported;
+     `input.reduction` decides which the figures use.
+2. `input.reduction` (optional, but set it on an integrated object) — the
+   Seurat reduction every figure is drawn on, named exactly as
+   `Reductions(obj)` prints it (`wnn.umap`, `umap.harmony`, ...). Empty means
+   a layout is computed instead, with no batch correction, which for a
+   multi-sample integrated object is not the one you clustered on. A name the
+   object does not have fails at step 01, with the available names listed.
+   Figures only: no GRN stage reads a reduction.
+3. `input.celltype_scope` (optional) — a list of cell-type values from
    `celltype_column`. When set, step 01 drops all other cells before exporting,
    so topic modeling, DARs, metacells, and RSS all operate on the focused
    universe (good for sensitivity when you care about a specific lineage).
    Leave empty / omit to use every cell.
-3. `input.ctx_db`, `input.dem_db` — cisTarget feather databases.
-4. `input.motif_annotations` — motif-to-TF table.
+4. `input.ctx_db`, `input.dem_db` — cisTarget feather databases.
+5. `input.motif_annotations` — motif-to-TF table.
 
 ## Outputs
 

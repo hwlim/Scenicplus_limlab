@@ -18,6 +18,10 @@ option_list <- list(
   make_option(c("--celltype_col"),   type = "character"),
   make_option(c("--celltype_scope"), type = "character", default = "",
               help = "Comma-separated cell-type values to keep. Empty = use all cells."),
+  make_option(c("--reduction"),      type = "character", default = "",
+              help = paste("Name of the Seurat reduction to use as the plotting",
+                           "layout downstream, exactly as Reductions(obj) prints",
+                           "it. Empty = none chosen, and step 02 computes one.")),
   make_option(c("--out_dir"),        type = "character")
 )
 opt <- parse_args(OptionParser(option_list = option_list))
@@ -32,6 +36,21 @@ if (!"RNA" %in% Assays(obj))    stop("Seurat object missing 'RNA' assay")
 if (!"peaks" %in% Assays(obj))  stop("Seurat object missing 'peaks' assay")
 if (!opt$celltype_col %in% colnames(obj@meta.data)) {
   stop("celltype_column '", opt$celltype_col, "' not found in metadata")
+}
+
+# --- The reduction that becomes X_umap downstream.
+#
+# Checked HERE, on the object itself, so a name that does not exist fails in
+# the first minute of the pipeline rather than becoming a silently fabricated
+# layout at step 02. That fabrication is what made a multi-sample integrated
+# run look unintegrated in every plot: step 02 recognised no reduction, fell
+# back to a plain PCA-UMAP of the RNA matrix, and said so only in its log.
+reduction <- trimws(opt$reduction)
+if (nzchar(reduction) && !reduction %in% Reductions(obj)) {
+  stop("input.reduction '", reduction, "' is not a reduction in this object.\n",
+       "  Available: ", paste(Reductions(obj), collapse = ", "), "\n",
+       "  Use one of those, or leave input.reduction empty to have a UMAP\n",
+       "  computed at step 02 (no batch correction -- see config.yaml).")
 }
 
 # --- Optional cell-type subsetting (drives sensitivity for focused analyses)
@@ -120,6 +139,9 @@ writeLines(
     paste0("n_cells: ", ncol(rna_raw)),
     paste0("n_genes: ", nrow(rna_raw)),
     paste0("n_peaks: ", nrow(atac_raw)),
+    paste0("reduction: ",
+           if (nzchar(reduction)) reduction else "(none -- computed at step 02)"),
+    paste0("reductions_available: ", paste(reductions, collapse = ",")),
     paste0("celltypes: ",
            paste(sort(unique(as.character(meta[[opt$celltype_col]]))), collapse = ","))
   ),
