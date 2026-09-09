@@ -374,15 +374,53 @@ or fail on the R + Seurat + Signac layer.
 
 ## 7. What has actually been run, and where
 
+Updated 2026-09-08.
+
 | | status |
 |---|---|
-| steps 1–3 | **run on real data** (PBMC 400 fixture, local) |
-| step 4 | **blocked locally by the sandbox** (Ray), not attempted elsewhere |
-| steps 5–20 | **never executed** |
-| flattened stages 6–18 | flags validated against the Snakefile AND the installed CLI; **not run** |
-| driver sentinel/cascade logic | validated by simulation: all-skip baseline, cascade from exactly the edited step, and a negative control (an unhashed key changes nothing) |
+| **steps 1–20, CCHMC cluster, human/hg38** | **run to completion, twice** |
+| — first pass | steps 1–19 with a pre-fix step 3 (tagged barcodes) plus a `bc_transform_func` workaround; step 20 after the plotnine fix |
+| — second pass | **from scratch on the current code**, stopping once at step 7 to build the genome files, which were supplied through `input.genome_annotation` / `input.chromsizes` |
+| steps 1–3, local WSL workstation | run on the PBMC-400 fixture |
+| step 4, local | **blocked by the sandbox** (Ray's plasma socket); never attempted locally since |
+| **mouse / mm10** | **never run.** `scenicplus_make_genome_files.R` is verified (see below); no mouse object has met step 1 |
+| driver sentinel/cascade logic | validated by simulation, then in practice — a `grn.*` edit re-ran 12–20 and skipped 1–11 |
 
-Treat the first cluster run of steps 5–20 as their real test. The history of the
-sister pipeline is that every component which actually ran turned up a defect
-the static checks missed — this one already has: step 3 logged
-`n_regions = <cell count>` until it was run and the number looked wrong.
+**Outputs that have been looked at,** as opposed to merely produced:
+`search_space.tsv` (185,070 links, 56,032 of 61,490 peaks, median TSS distance
+53 kb, zero non-standard contigs) and `03_rss_per_celltype` (recovers SPIB and
+BCL11A in naive B, LEF1 in naive CD4 T, KLF4 in classical monocytes, CEBPA and
+MAFB in intermediate monocytes, TBX21 in effector/MAIT — consistent with the
+FigR result on the same data). **Not** looked at: the eRegulon tables, and the
+topic count LDA settled on.
+
+**`scenicplus_make_genome_files.R`** has been run for both species but never
+consumed by a pipeline run. Its human output was cross-checked against the
+chromsizes that produced the working PBMC run: all 25 shared chromosomes have
+identical lengths.
+
+### The prediction in the old version of this section held
+
+It said to treat the first cluster run as the real test, because every component
+that actually ran turned up a defect the static checks missed. It did — **eight
+failures that stopped a run**, and a ninth found only by looking at an output:
+
+| # | stopped at | the two things that had to agree |
+|---|---|---|
+| 1 | install "succeeded" | user site vs env `site-packages` |
+| 2 | pip picked an sdist | login-node glibc vs compute-node glibc |
+| 3 | OOM at 128 GB | `rusage[mem]` reserved vs `-M` enforced |
+| 4 | step 6 import | a wheel's libstdc++ vs conda's |
+| 5 | step 6 cell overlap | cisTopic's tagged barcodes vs the RNA AnnData's |
+| 6 | step 7 exited 0 | what it wrote vs what step 8 needed |
+| 7 | step 8 `KeyError` | Ensembl vs UCSC chromosome names |
+| 8 | step 20 `savefig` | matplotlib's API vs plotnine's |
+| 9 | *nothing* | a 301-megapixel figure, found by opening it |
+
+Every one named neither side. All are now fixed at the source with a check that
+says which disagreed.
+
+**So the same warning, pointed at what is still untested:** mouse is the next
+real test, and the parameters have never been examined at all — the topic-count
+sweep, the DAR thresholds and the search-space width are as shipped, chosen by
+nobody. A green run says the plumbing holds, not that the numbers mean anything.
