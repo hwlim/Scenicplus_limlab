@@ -158,6 +158,18 @@
     of 2026-09-08 in a new place. Confirmed the added `.cfgsha` key does NOT
     disturb an existing workspace: for a config without `input.reduction` the
     hash is identical before and after, and changes the moment it is set.
+  - Confirmed on the cluster the same day: a named reduction produces the
+    figure it names.
+  - RUNBOOK gained a Quickstart covering install through submission, and it
+    records how runs are ACTUALLY submitted rather than how the scripts could
+    be used: `scenicplus_run_lsf.sh` called from a per-workspace `run.sh`, from
+    a node of the class the env was built for. The node class is not a
+    preference -- `run_lsf.sh` runs the preflight on the SUBMITTING host before
+    anything is queued, so the shell you type in is the one that gets checked,
+    and it is also the environment LSF carries into the job. The `_cchmc`
+    launcher, which loads modules inside the job, has never been the path in
+    use; the runbook now says so rather than implying either is equally
+    travelled.
 
 Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
 2026-09-09; artifacts not inspected here). The PARAMETERS have never been
