@@ -176,7 +176,7 @@ if ! command -v scenicplus >/dev/null 2>&1; then
     echo "[preflight] ERROR: 'scenicplus' is not on PATH." >&2
     echo "[preflight]   Every GRN stage execs it as a command. If the package" >&2
     echo "[preflight]   imports but this is missing, pip installed it outside the" >&2
-    echo "[preflight]   env -- see install_local.sh." >&2
+    echo "[preflight]   env -- see install_cchmc.sh." >&2
     FAIL=1
 elif ! scenicplus --help >/dev/null 2>&1; then
     echo "[preflight] ERROR: '$(command -v scenicplus) --help' exits non-zero:" >&2

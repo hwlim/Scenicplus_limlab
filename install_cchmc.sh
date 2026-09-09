@@ -1,21 +1,34 @@
 #!/usr/bin/env bash
-# Build the SCENIC+ environment: conda layer from environment.local.yml, then
+# Build the SCENIC+ environment: conda layer from environment.cchmc.yml, then
 # the pip layer in two phases.
 #
-# Verified 2026-09-07 on linux-64 (WSL2, micromamba). Result: scenicplus 1.0a2,
-# pycistarget, pycisTopic, snakemake 8.5.5, Seurat 5.5.1, Signac 1.17.1.
+# SCOPE: CCHMC ONLY. Named for the site it was built against and is the only
+# site it has been run at. What is actually established:
 #
-#   ./install_local.sh [PREFIX]      # default: ./scenicplus_env
+#   * the ENV RECIPE solves and builds on two machines -- the CCHMC HPC compute
+#     nodes (conda) and a WSL2 / Ubuntu 24.04 workstation (micromamba);
+#   * the PIPELINE has run end to end (all 20 steps, real data) on CCHMC ONLY.
+#     Nothing here has been exercised at another site.
 #
-#   SCP_COPY=1  ./install_local.sh ...   # copy instead of hardlink (SMB/CIFS,
+# What is CCHMC-shaped and will not transfer unexamined: the LSF launchers and
+# their queue/module names, the glibc split between login and compute nodes that
+# decides which wheels pip picks, and the assumption that pip.conf may carry
+# `user = true`. Treat a first run elsewhere as a port, not an install.
+#
+# Result: scenicplus 1.0a2, pycistarget, pycisTopic, snakemake 8.5.5,
+# Seurat 5.5.1, Signac 1.17.1, python 3.11.8.
+#
+#   ./install_cchmc.sh [PREFIX]      # default: ./scenicplus_env
+#
+#   SCP_COPY=1  ./install_cchmc.sh ...   # copy instead of hardlink (SMB/CIFS,
 #                                        # lustre, or anywhere hardlinks fail)
-#   SCP_FRESH=1 ./install_local.sh ...   # delete an existing prefix first
-#   SCP_CLEAN_PKGS=1 ./install_local.sh ...  # drop partially-extracted packages
+#   SCP_FRESH=1 ./install_cchmc.sh ...   # delete an existing prefix first
+#   SCP_CLEAN_PKGS=1 ./install_cchmc.sh ...  # drop partially-extracted packages
 #                                        # from the cache (CondaVerificationError
 #                                        # "... appears to be corrupted")
-#   SCP_FROM=1  ./install_local.sh ...   # skip phase 0; the conda layer is done
-#   SCP_FROM=2  ./install_local.sh ...   # skip phases 0-1; only pip scenicplus
-#   SCP_BUILD_TOOLCHAIN=1 ./install_local.sh ...  # glibc < 2.28: pull rust into
+#   SCP_FROM=1  ./install_cchmc.sh ...   # skip phase 0; the conda layer is done
+#   SCP_FROM=2  ./install_cchmc.sh ...   # skip phases 0-1; only pip scenicplus
+#   SCP_BUILD_TOOLCHAIN=1 ./install_cchmc.sh ...  # glibc < 2.28: pull rust into
 #                                        # the env instead of using a newer node
 #
 # SCP_FROM is for when phase 0 has already SUCCEEDED and re-solving it is the
@@ -32,7 +45,7 @@
 # installed the package outside this prefix -- almost always the user site,
 # because ~/.config/pip/pip.conf says `user = true` or PIP_USER is set. Repair:
 #
-#   SCP_FROM=2 ./install_local.sh <prefix>      # pip layer only, ~2 min
+#   SCP_FROM=2 ./install_cchmc.sh <prefix>      # pip layer only, ~2 min
 #
 # See the PIP_USER / PYTHONNOUSERSITE block below for why the import checks used
 # to pass anyway.
@@ -62,7 +75,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_PREFIX="${1:-$HERE/scenicplus_env}"
-YML="$HERE/environment.local.yml"
+YML="$HERE/environment.cchmc.yml"
 
 CONDA=""
 for c in micromamba mamba conda; do
@@ -237,7 +250,7 @@ PY
 #   pysam==0.22.0      only manylinux_2_28 for cp311 -> C, plus bzip2/xz for the
 #                      htslib it bundles.
 #   diptest==0.11.0    only manylinux_2_24+ -> C++ (cxx-compiler, already in
-#                      environment.local.yml).
+#                      environment.cchmc.yml).
 #
 # Everything else in the pin set has a manylinux_2_17 wheel or is pure python
 # (checked: of the packages installed as binary wheels on the 2.39 reference
