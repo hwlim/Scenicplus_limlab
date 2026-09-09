@@ -1,6 +1,18 @@
-# SCENIC+ environment — CONDA LAYER ONLY. See install_local.sh for the pip layer.
+# SCENIC+ environment — CONDA LAYER ONLY. See install_cchmc.sh for the pip layer.
 #
-# Verified working 2026-09-07 on linux-64 (WSL2, Ubuntu 24.04, micromamba).
+# SCOPE: CCHMC ONLY. Named for the site it was built against and is the only
+# site it has been run at. What is actually established:
+#
+#   * the ENV RECIPE solves and builds on two machines -- the CCHMC HPC compute
+#     nodes (conda) and a WSL2 / Ubuntu 24.04 workstation (micromamba);
+#   * the PIPELINE has run end to end (all 20 steps, real data) on CCHMC ONLY.
+#     Nothing here has been exercised at another site.
+#
+# What is CCHMC-shaped and will not transfer unexamined: the LSF launchers and
+# their queue/module names, the glibc split between login and compute nodes that
+# decides which wheels pip picks, and the assumption that pip.conf may carry
+# `user = true`. Treat a first run elsewhere as a port, not an install.
+#
 # Produces: scenicplus 1.0a2, pycistarget, pycisTopic, snakemake 8.5.5,
 #           Seurat 5.5.1, Signac 1.17.1, python 3.11.8.
 #
@@ -12,7 +24,7 @@
 #     not declare setuptools, so an isolated build env has none);
 #   * loomxpy must be built WITH isolation (pip has to fetch its poetry backend,
 #     which is not in this env).
-# One `pip:` section cannot do both, so the pip layer lives in install_local.sh.
+# One `pip:` section cannot do both, so the pip layer lives in install_cchmc.sh.
 #
 # WHAT DIFFERS FROM environment.yml, AND WHY
 # ------------------------------------------
@@ -31,7 +43,7 @@
 #                           0.8.3, pip then rebuilds 0.8.2 from source and fails.
 #      pybedtools==0.9.1 -> conda has NO py311 build (py38/39/310 only), so it
 #                           cannot be listed here at all -- doing so makes the
-#                           solve fail. It is compiled in install_local.sh
+#                           solve fail. It is compiled in install_cchmc.sh
 #                           phase 1, which is why the toolchain in note 2 is
 #                           not optional on a box without system compilers.
 # 4. `snakemake` is NOT listed and never was. scenicplus DEPENDS on
@@ -39,7 +51,7 @@
 #    dropped from the environment even though the pipeline no longer invokes it
 #    (see FlattenIdea.md, which is wrong on this point).
 
-name: scenicplus_limlab_local
+name: scenicplus_limlab_cchmc
 channels:
   - conda-forge
   - bioconda
@@ -50,7 +62,7 @@ dependencies:
   - datrie=0.8.2
   # pybedtools is NOT here on purpose: the pinned 0.9.1 has no py311 conda
   # build (py38/39/310 only), so listing it makes the solve FAIL. It is
-  # compiled from sdist in phase 1 of install_local.sh instead.
+  # compiled from sdist in phase 1 of install_cchmc.sh instead.
 
   # --- build toolchain: required where the system has no compiler (note 2) ---
   - c-compiler

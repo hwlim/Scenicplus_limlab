@@ -41,11 +41,19 @@ onto a COPY of the object.
 
     git clone -b test https://github.com/hwlim/Scenicplus_limlab.git
     cd Scenicplus_limlab
-    ./install_local.sh /path/to/scenicplus_env
+    ./install_cchmc.sh /path/to/scenicplus_env
 
-Uses `environment.local.yml`, not `environment.yml` — the latter does not
+Uses `environment.cchmc.yml`, not `environment.yml` — the latter does not
 produce a working environment (its own header says it was never run-tested).
 See that file's header for the four deviations and why each is load-bearing.
+
+> **Both files are named `cchmc` because that is the only site they have been
+> run at.** The env recipe itself solves and builds on two machines (CCHMC
+> compute nodes via conda, a WSL2 workstation via micromamba), but **the
+> pipeline has run end to end on CCHMC only**. The LSF launchers, the queue and
+> module names, the login-vs-compute glibc split that decides which wheels pip
+> picks, and the `user = true` pip.conf assumption are all CCHMC-shaped. A first
+> run at another site is a port, not an install.
 
 Takes ~20 min; phase 2 pulls ~200 packages from PyPI. **If the cluster gates
 egress or needs an index mirror, that is where it stops** — the conda layer will
@@ -72,7 +80,7 @@ site-packages`, with the console script in `~/.local/bin`), because
 `~/.config/pip/pip.conf` carries `user = true` or `PIP_USER` is set. Repair
 without redoing the conda layer:
 
-    SCP_FROM=2 ./install_local.sh /path/to/scenicplus_env      # ~2 min
+    SCP_FROM=2 ./install_cchmc.sh /path/to/scenicplus_env      # ~2 min
 
 The user site precedes the env's `site-packages` on `sys.path`, so a stale copy
 there also *shadows* the env at run time, silently. Export
@@ -296,12 +304,12 @@ Nothing is really corrupted -- the directories were partially EXTRACTED when the
 job died, and conda verifies them against the package manifest. The downloaded
 archives are usually fine. Fix:
 
-    SCP_CLEAN_PKGS=1 ./install_local.sh /path/to/env
+    SCP_CLEAN_PKGS=1 ./install_cchmc.sh /path/to/env
 
 which drops the unpacked directories, keeps the archives (so nothing is
 re-downloaded), and resumes into the existing env folder.
 
-**Old conda may not solve the env.** `install_local.sh` prefers micromamba, then
+**Old conda may not solve the env.** `install_cchmc.sh` prefers micromamba, then
 mamba, then conda. A 2020-vintage conda on the classic solver may be very slow
 or fail on the R + Seurat + Signac layer.
 
