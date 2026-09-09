@@ -30,3 +30,89 @@
     49 WorkflowError:
     50 At least one job did not complete successfully.
     ```
+
+20260730: Flattened the inner snakemake (`f71405a`)
+  - SCENIC+'s `grn_inference`/`prepare_data` steps ran through an opaque child
+    snakemake spawned inside step 07. Replaced with 13 native driver stages
+    dispatched by `scripts/scenicplus_06_grn_stage.py`, one `scenicplus` CLI
+    call each. Trades that snakemake's intra-DAG parallelism for real per-stage
+    sentinel / `.cfgsha` / cascade resume. Branch `flatten-inner-snakemake`.
+  - Not run at this point. Only the flags were checked, against the generated
+    Snakefile and the installed CLI.
+
+20260907: A working environment, and steps 1-3 on real data
+  - `environment.yml` never produced a usable env (its own header says it was
+    never run-tested). `environment.cchmc.yml` + `install_cchmc.sh` do, in two
+    pip phases: `pybedtools==0.9.1` needs `--no-build-isolation` (its sdist
+    declares no setuptools) while `loomxpy` needs isolation ON (poetry backend).
+    One `pip:` section cannot express both, which is why the installer exists.
+  - Steps 1-3 run locally (WSL) on a PBMC-400 multiome fixture: 1149 cells,
+    12210 genes, 61490 peaks, 25 cell types. Step 4 blocked by the sandbox --
+    Ray cannot create its plasma socket. Not a code problem.
+  - Also found by running step 3: it reported `n_regions` as the CELL count.
+
+20260908: End to end on CCHMC, twice
+  - **All 20 steps completed**, human/hg38, PBMC-400 fixture. Then a SECOND run
+    from scratch on the fixed code, stopping once at step 7 to build the genome
+    files, supplied through `input.genome_annotation` / `input.chromsizes`.
+    That second run is the one that matters: the first still used a pre-fix
+    step 3 plus a `bc_transform_func` workaround.
+  - Getting there took EIGHT failures that stopped a run, plus a ninth found
+    only by opening an output. Every one was two things that had to agree while
+    the error named neither:
+
+    | | stopped at | the disagreement | fix |
+    |---|---|---|---|
+    | 1 | install "succeeded", no `bin/scenicplus` | user site vs env site-packages | `c0c672e` |
+    | 2 | pip took an sdist needing rust | login-node glibc vs compute-node glibc | `b6a6e05` |
+    | 3 | OOM with 128 GB requested | `rusage[mem]` reserves, `-M` enforces | `61e184b` |
+    | 4 | step 6 `CXXABI_1.3.15` | a wheel's libstdc++ vs conda's | `caf82cd` |
+    | 5 | step 6 "no cells in both assays" | cisTopic's tagged barcodes vs the RNA AnnData's | `087ee71` |
+    | 6 | step 7 exited 0 with no chromsizes | what it wrote vs what step 8 needed | `3f9b6c5` |
+    | 7 | step 8 pandas `KeyError` | Ensembl vs UCSC chromosome names | `3e07d07` |
+    | 8 | step 20 `'ggplot' has no attribute 'savefig'` | matplotlib's API vs plotnine's | `187bdf3` |
+    | 9 | nothing -- a 301-megapixel PNG | `plot_rss` multiplies the figsize it is given | `9511ac7` |
+
+  - #6 and #7 are one cause. `download_genome_annotations` derives chromsizes
+    from NCBI E-utilities `db=genome`, a RETIRED database that answers HTTP 200
+    with `<Count>0</Count>` for every term -- reproduced from two unrelated
+    networks, so not a firewall. The same swallowed branch also does the UCSC
+    chromosome-name conversion and the assembled-molecule subsetting. Reported
+    upstream as aertslab/scenicplus#640 with a verified fix (`db=assembly`
+    returns the same UID the code already needs); commented on the open #611.
+    #476 is the identical failure, closed in 2024 on a per-user workaround with
+    no diagnosis. No PR has ever touched the function.
+  - THIS IS THE SAME FAILURE AS 20260512 ABOVE. The mouse run hit `db=genome`
+    too -- and reported `Using genome: GRCm39` while the data is mm10/GRCm38,
+    which is the half that would NOT have announced itself.
+  - Outputs looked at, not merely produced: `search_space.tsv` (185,070 links,
+    56,032 of 61,490 peaks, median TSS distance 53 kb, zero non-standard
+    contigs) and the RSS plot, which recovers SPIB/BCL11A in naive B, LEF1 in
+    naive CD4 T, KLF4 in classical monocytes, CEBPA/MAFB in intermediate
+    monocytes, TBX21 in effector/MAIT -- consistent with the FigR result on the
+    same data. 25 cell types over 1149 cells is too fine for RSS; collapse to
+    lineage before trusting per-type values.
+  - `scenicplus_make_genome_files.R` (`91c3df0`): both files from a pinned
+    EnsDb, so the assembly is the one chosen rather than the one Ensembl serves
+    today. Prints `chr1 = 195,471,971` for mm10; GRCm39's is 195,154,279. Its
+    hg38 output matched the chromsizes from the working run on all 25 shared
+    chromosomes. RUNBOOK section 2b covers the mouse setup.
+
+20260909: Plan for a Snakemake workflow (`SnakemakePlan.md`, branch `test`)
+  - Written now because there is finally a trusted end-to-end result to gate
+    each increment against. Not a rewrite: the step scripts and
+    `scenicplus_06_grn_stage.py` stay; only `run_step`'s sentinel/`.cfgsha`/
+    cascade is replaced by Snakemake's DAG.
+  - Three reasons. The LSF launcher bsubs the whole driver as ONE job sized for
+    the heaviest stage, so step 20's plots hold 16 cores and 128 GB for hours.
+    `run_step` hashes config but NOT code, so a step whose script changed still
+    reads fresh -- which is why no workspace re-ran step 3 after `087ee71`. And
+    `input.assembly` is dead config that looks live.
+  - Open, not decided: whether step NUMBERS survive as the interface
+    (`--from 7`) once rule names exist.
+
+Status: end-to-end on human/hg38 small-scale PBMC only. **Mouse has never been
+run** -- the generator is verified, no mouse object has met step 1. The
+PARAMETERS have never been examined: the topic-count sweep, the DAR thresholds
+and the search-space width are as shipped. A green run says the plumbing holds,
+not that the numbers mean anything.
