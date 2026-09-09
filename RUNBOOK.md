@@ -19,124 +19,10 @@ already known to differ.
 
 ## Quickstart
 
-The whole path in order, with the reasoning left out. Each entry names the
-section that carries it.
-
-**A. Install the environment — once per site, ~20 min** (§1)
-
-    git clone -b main https://github.com/hwlim/Scenicplus_limlab.git
-    cd Scenicplus_limlab
-    ./install_cchmc.sh /path/to/scenicplus_env
-    /path/to/scenicplus_env/bin/scenicplus --help      # must print usage
-
-Install on the node class you will run jobs on, since pip picks wheels for the
-glibc of the host it runs on. If that last file is missing, pip installed
-outside the prefix: `SCP_FROM=2 ./install_cchmc.sh <prefix>` repairs it in about
-two minutes without redoing the conda layer.
-
-**B. cisTarget databases — once per assembly, 45.7 GB** (§2)
-
-Nothing before step 9 needs them, so start the download and carry on.
-
-**C. Point the shell at the pipeline — every session** (§3)
-
-    export SCENICPLUS_PATH=/path/to/Scenicplus_limlab
-    export PATH=$SCENICPLUS_PATH/scripts:/path/to/scenicplus_env/bin:$PATH
-    export PYTHONNOUSERSITE=1
-    export LD_LIBRARY_PATH=/path/to/scenicplus_env/lib:$LD_LIBRARY_PATH
-
-**D. Build the genome files — once per assembly** (§2b)
-
-Step 7 cannot produce chromsizes for anyone, so build both files up front rather
-than letting a run stop at step 7. This needs EnsDb and BSgenome, which are in
-the `scRNA_LimLab_Snake` environment, **not** this one:
-
-    Rscript $SCENICPLUS_PATH/scripts/scenicplus_make_genome_files.R \
-        --species mouse --out-dir /path/to/refs/mm10
-
-Read the `chr1 = ...` line it prints. 195,471,971 is mm10 and 195,154,279 is
-GRCm39, so that one number settles which assembly you are about to analyse.
-
-**E. Create the analysis directory** (§3)
-
-    mkdir -p /path/to/analysis && cd /path/to/analysis
-    scenicplus_init.sh                       # writes config/config.yaml
-
-**F. Fill in `config/config.yaml`** (§3; §2b for mouse)
-
-| key | value |
-|---|---|
-| `input.seurat_rds` | absolute path to the object |
-| `input.celltype_column` | the categorical column to group by |
-| `input.reduction` | e.g. `wnn.umap`, the layout every figure is drawn on |
-| `input.species` | `hsapiens` or `mmusculus` |
-| `input.genome_annotation`, `input.chromsizes` | from D |
-| `input.ctx_db`, `input.dem_db`, `input.motif_annotations` | from B |
-| `resources.n_cpu` | cores the job will have |
-
-**G. Plan, then submit** (§4)
-
-    scenicplus_run_pipeline.sh --dry-run       # prints the plan, runs nothing
-    ./run.sh                                   # the workspace's own runner
-
-Every run to date has gone through `scenicplus_run_lsf.sh`, called from a small
-`run.sh` kept in the analysis directory that sets up the environment and passes
-the LSF settings. Keeping it there rather than in shell history puts the
-settings a run used beside that run's outputs, and makes a re-run one command.
-A skeleton, to be adjusted per site:
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-module purge
-module load anaconda3 R/4.4.0-R0            # the preflight runs Rscript here
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate /path/to/scenicplus_env
-
-export SCENICPLUS_PATH=/path/to/Scenicplus_limlab
-export PATH=$SCENICPLUS_PATH/scripts:$PATH
-export PYTHONNOUSERSITE=1
-
-export LSF_QUEUE=normal LSF_PROJECT=scenicplus
-export LSF_CORES=16 LSF_MEM_MB=128000 LSF_WALLTIME=72:00
-scenicplus_run_lsf.sh "$@"                  # --from 7, --only 20, --force, ...
-```
-
-**The submitting shell IS the job's environment.** `scenicplus_run_lsf.sh`
-bsubs `/bin/bash -c` and loads no modules inside the job, while LSF carries the
-submission environment across, so whatever the runner sets is what all twenty
-steps run under. `LD_LIBRARY_PATH` is the exception: the driver prepends the
-env's `lib` itself (`scenicplus_run_pipeline.sh:91`), so add it to the runner
-only if the preflight complains about libstdc++.
-
-**So submit from the node class the environment was built for.** The preflight
-runs on the *submitting* host, before anything is queued
-(`scenicplus_run_lsf.sh:49-51`). It therefore checks the shell you are typing
-in, not the one the job will get. Two consequences, both of which have bitten:
-R has to be loaded to submit and not only to run, and a login node whose glibc
-or module set differs from the compute nodes fails the check with nothing
-queued. In practice, start an interactive session on the right class and run the
-runner there. `SCENICPLUS_SKIP_CHECK=1` skips the preflight, but skipping it
-removes the check that catches exactly the environment mismatches this project
-has spent the most time on, so prefer submitting from the right place.
-
-`scenicplus_run_lsf_cchmc.sh` is an alternative that loads the modules inside
-the job instead, for a shell that cannot set this up before submitting. It has
-not been the path in use.
-
-The memory number above is an example, not a measured requirement. Size it from
-§5b, where step 4 dominates because its peak is the SUM over the topic models
-fitted at once. Both `-M` and `rusage[mem]` now carry whatever you set, so an
-under-request dies as `TERM_MEMLIMIT` rather than being quietly ignored.
-
-**H. Watch, then read** (§4, §5)
-
-    bjobs
-    tail -f logs/01_seurat_to_anndata.log
-    ls results/plots results/tables
-
-Every UMAP figure names in its title the layout it was drawn on. If that is not
-the reduction you named, read the `input.reduction` note in §3.
+Moved to [quickstart.md](quickstart.md), which is the path to follow: install
+through submission, for the CCHMC HPC or a personal machine. It points back here
+for the reasoning behind each step, and this file stays the reference rather than
+the tutorial.
 
 ---
 
@@ -173,7 +59,7 @@ onto a COPY of the object.
 
 ## 1. Environment
 
-    git clone -b test https://github.com/hwlim/Scenicplus_limlab.git
+    git clone -b main https://github.com/hwlim/Scenicplus_limlab.git
     cd Scenicplus_limlab
     ./install_cchmc.sh /path/to/scenicplus_env
 

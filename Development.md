@@ -160,9 +160,22 @@
     hash is identical before and after, and changes the moment it is set.
   - Confirmed on the cluster the same day: a named reduction produces the
     figure it names.
-  - RUNBOOK gained a Quickstart covering install through submission, and it
-    records how runs are ACTUALLY submitted rather than how the scripts could
-    be used: `scenicplus_run_lsf.sh` called from a per-workspace `run.sh`, from
+  - Branches consolidated: `test` merged into `main` and
+    `flatten-inner-snakemake`, then deleted. All three had identical content;
+    the only obstacle was one commit duplicated by an earlier cross-branch
+    cherry-pick. Work continues on `flatten-inner-snakemake`. Entries above
+    that name `test` describe where things happened at the time.
+  - `quickstart.md`: the path a lab member follows, install through submission,
+    with the CCHMC HPC and a personal machine as two named routes. The lab's
+    pre-downloaded cisTarget databases and genome files under
+    `/data/limlab/Resource/Scenicplus_db/` are recorded there, so nobody
+    re-downloads 45.7 GB. Written in plain ASCII deliberately: the first draft
+    used typographic dashes and section signs, and they did not survive being
+    copied between editors. RUNBOOK keeps the reasoning and stops being the
+    tutorial.
+  - Both documents record how runs are ACTUALLY submitted rather than how the
+    scripts could be used: `scenicplus_run_lsf.sh` called from a
+    per-workspace `run.sh`, from
     a node of the class the env was built for. The node class is not a
     preference -- `run_lsf.sh` runs the preflight on the SUBMITTING host before
     anything is queued, so the shell you type in is the one that gets checked,
