@@ -136,6 +136,15 @@ fails at step 1, in the first minute, with the available names listed.
 Species and assembly must agree with the genome files from B. They are not
 checked against each other.
 
+Everything else can stay at its shipped value for a first run. If runtime
+matters, read RUNBOOK section 5b before starting rather than after: it lists the
+four parameters that dominate it, with a cheaper value for each and what that
+value costs in resolution rather than in seconds. The largest savings are in how
+many topic models step 4 fits and how wide the region-to-gene threshold grid is.
+That section is also where the settings for a deliberately cheap plumbing test
+are spelled out, for when you want to prove the pipeline runs rather than to
+believe its numbers.
+
 ## F. Plan, then run
 
 RUNBOOK section 4.
