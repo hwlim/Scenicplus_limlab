@@ -83,10 +83,10 @@ Snakefile                  orchestration only: configfile, validate(), the
                            onsuccess/onerror -> provenance
 rules/common.smk           helpers, NO rules: STAGES + stage_path(), resource
                            tiers, the species table, log_path()
-rules/prepare.smk          steps 1-5
-rules/genome.smk           the genome files + the assembly record  <-- see below
-rules/grn.smk              steps 6, 8-18 (all via scenicplus_06_grn_stage.py)
-rules/report.smk           steps 19-20
+rules/prepare.smk          R01-R05
+rules/genome.smk           R07 + the assembly record  <-- see below
+rules/grn.smk              R06, R08-R18 (all via scenicplus_06_grn_stage.py)
+rules/report.smk           R19-R20 (+ the report.html rule at I6)
 schemas/config.schema.yaml the contract
 Template/config.yml        the shipped template, matching the schema key for key
 profiles/lsf/config.yaml   + lsf-status.sh, as scRNA_LimLab_Snake has
@@ -219,12 +219,13 @@ first: there is a trusted end-to-end result to diff against.
 | **I3** | `rules/grn.smk` — steps 6, 8–18 | full run from `3.cistopic/`; `search_space.tsv` and `scplusmdata.h5mu` match |
 | **I4** | `rules/report.smk` — steps 19–20 | figures render; the RSS PNG is ~12 Mpx, not 301 |
 | **I5** | per-rule resources + LSF profile | a real cluster run; compare wall-clock and peak RSS per step against the single-job baseline |
-| **I6** | provenance bundle (config.used, git, logs, `lsf_jobs.tsv`, `assembly.json`) | bundle from a failed run contains the failing log |
-| **I7** | retire `scenicplus_run_pipeline.sh` | the runner is the only entry point; RUNBOOK rewritten |
+| **I6** | `report.html`, and `rule all` switched to it | renders for a complete run; a run that fails mid-DAG still leaves usable logs + bundle |
+| **I7** | provenance bundle (config.used, git, logs, `lsf_jobs.tsv`, `assembly.json`) | bundle from a failed run contains the failing log |
+| **I8** | retire `scenicplus_run_pipeline.sh` | the runner is the only entry point; RUNBOOK rewritten |
 
 I0–I4 are mechanical; I5 is where the payoff lands. Stopping after I4 is
-coherent (correct, still one big job); stopping after I5 is coherent (right-sized
-jobs, no provenance).
+coherent (correct, still one big job); after I5 (right-sized jobs, no report);
+after I6 (a run someone can read). I7–I8 are the tidy-up.
 
 ---
 
@@ -249,18 +250,90 @@ Each of these cost a real run in one repo or the other:
 
 ---
 
-## Open questions
+## Decisions
 
-1. **Shared reference dir or per-workspace?** Recommended shared
-   (`reference.dir`), since genome files depend only on species+assembly and the
-   cisTarget databases already live that way. Per-workspace copies would be 46 GB
-   each.
-2. **A `report.html`?** `scRNA_LimLab_Snake` has one and it is the main way
-   anyone looks at a run. SCENIC+ currently emits loose PNGs and TSVs. Probably
-   worth it, but after I5.
-3. **Does the workspace keep `--from N` ergonomics?** Snakemake's equivalent is
-   `--forcerun <rule>`, which cascades the same way. The runner can map a
-   `-f <rule>` flag onto it, but the step *numbers* stop being the interface —
-   rule names take over. Worth deciding before the RUNBOOK is rewritten.
-4. **Where does `scenicplus_check.sh` run?** As a rule with no outputs it would
-   run every invocation. Probably stays in the runner, before snakemake starts.
+Settled 2026-09-09. Each was open in the first draft; none is a guess.
+
+### 1. Genome files live in a shared reference directory, named in the config
+
+```yaml
+reference:
+  dir: /data/limlab/Resource/scenicplus     # built once per assembly
+```
+
+They depend only on species + assembly, so they belong beside the cisTarget
+databases rather than copied into every workspace — those are 45.7 GB and the
+genome files should follow the same rule.
+
+### 2. There will be a `report.html`, after the resource work
+
+`scRNA_LimLab_Snake` has one and it is how anyone actually looks at a run;
+SCENIC+ currently emits loose PNGs and TSVs. It lands as **I6**, after per-rule
+resources (I5), because a report of a run that took one oversized job says less
+than a report of one that was scheduled properly.
+
+### 3. Rule names are `R01_*` … `R20_*` — the step number survives
+
+This keeps the number as the interface while giving Snakemake real rule names.
+The `R` prefix is load-bearing, not decoration:
+
+```
+rule 07_genome_annot:      SyntaxError: invalid decimal literal
+rule R-07_genome_annot:    SyntaxError   (a hyphen is a minus sign)
+rule R07_genome_annot:     accepted
+```
+
+Snakemake compiles rule names as **Python identifiers**, so a name cannot begin
+with a digit and cannot contain a hyphen. Tested, not assumed.
+
+Zero-padding matters too: `R01`…`R20` sort in step order as strings, so
+`--list` prints the pipeline in the order it runs. Verified that all three
+targeting flags take the name and behave:
+
+```
+snakemake --list                              # R01_, R02_, R07_ in order
+snakemake --forcerun R02_build_anndata        # cascades to everything downstream
+snakemake --until R02_build_anndata           # stops there
+```
+
+`--forcerun R07_genome_annot` is therefore the direct replacement for
+`--from 7`, and the runner can keep a `-f 7` shorthand that maps a number onto
+the matching rule name.
+
+### 4. `rule all` targets the report
+
+`report.html` is the default target, so an ordinary `snakemake` run is not done
+until the run is readable. That makes the report non-optional by construction
+rather than by discipline — the failure mode it prevents is a green run whose
+outputs nobody opened, which this pipeline has already produced once (the
+301-megapixel RSS figure was "successful" for a day).
+
+Consequence to accept: **until I6 lands, `rule all` targets
+`5.analysis/` — the TSVs and plots from R19-R20.** The switch happens with the
+report rule, not before, or every increment up to it fails its own target.
+
+Consequence to design around: a *partial* run must still produce a report.
+Snakemake will not build `report.html` if an upstream rule failed, so the
+report rule cannot be the only way to see what happened — that is what the
+provenance bundle (I7) and the per-rule logs are for. The report is the default
+target, not the only artifact.
+
+### 5. The preflight runs in the runner, not as a rule
+
+`scenicplus_check.sh` has no outputs, so as a rule it would either run on every
+invocation or need a sentinel that lies about when it last passed. The runner
+executes it before snakemake starts — which is also where it belongs, since half
+of what it checks (which libstdc++ actually loaded, what pip's config says) is a
+property of the *environment the job is running in*, and is worth knowing before
+a DAG is built rather than as one node inside it.
+
+Note that this is the one place the current bash driver already got right, for
+the wrong reason: the check is in the driver because there was nowhere else to
+put it. Here it stays there on purpose.
+
+---
+
+## Still genuinely open
+
+- **`QC/` contents.** The stage taxonomy reserves it; what belongs there beyond
+  the topic-model selection plots is not decided.
