@@ -237,24 +237,33 @@ echo "[scenicplus_run_pipeline] N_CPU=$N_CPU  DRY_RUN=$DRY_RUN  FORCE_FROM=$FORC
 
 CELLTYPE_SCOPE="$(python "$HELPER" getcsv "$CONFIG" input.celltype_scope)"
 
+# `get` exits 1 on a key that is absent, which is what an analysis directory
+# created before input.reduction existed looks like. Empty is the documented
+# "compute one" setting, so an old config keeps working unchanged -- and since
+# the hash below only includes keys the config actually has, it also does not
+# force a re-run of a finished workspace.
+REDUCTION="$(python "$HELPER" get "$CONFIG" input.reduction || true)"
+
 run_step 1 seurat_to_anndata \
-    "input.seurat_rds,input.celltype_column,input.celltype_scope" \
+    "input.seurat_rds,input.celltype_column,input.celltype_scope,input.reduction" \
     "$S01" "
         Rscript '$SCRIPT_DIR/scenicplus_01_seurat_to_anndata.R' \
             --rds '$(python "$HELPER" get "$CONFIG" input.seurat_rds)' \
             --celltype_col '$CT_COL' \
             --celltype_scope '$CELLTYPE_SCOPE' \
+            --reduction '$REDUCTION' \
             --out_dir '$INTERIM/seurat_export' \
             > 'logs/01_seurat_to_anndata.log' 2>&1
     "
 
 run_step 2 build_anndata \
-    "input.celltype_column" \
+    "input.celltype_column,input.reduction" \
     "$S02" "
         python '$SCRIPT_DIR/scenicplus_02_build_anndata.py' \
             --in_dir '$INTERIM/seurat_export' \
             --out_h5ad '$S02' \
             --celltype_col '$CT_COL' \
+            --reduction '$REDUCTION' \
             > 'logs/02_build_anndata.log' 2>&1
     "
 
@@ -409,12 +418,14 @@ run_step 19 postprocess_tsv \
     "
 
 run_step 20 visualize \
-    "input.celltype_column,visualization" \
+    "input.celltype_column,input.reduction,visualization" \
     "$S20" "
         python '$SCRIPT_DIR/scenicplus_08_visualize.py' \
             --scplus_mdata '$S18' \
             --config '$CONFIG' \
             --out_dir '$PLOT_DIR' \
+            --embedding_dir '$INTERIM/seurat_export' \
+            --reduction '$REDUCTION' \
             > 'logs/20_visualize.log' 2>&1
     "
 

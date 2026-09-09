@@ -24,6 +24,9 @@ def main():
     p.add_argument("--in_dir", required=True)
     p.add_argument("--out_h5ad", required=True)
     p.add_argument("--celltype_col", required=True)
+    p.add_argument("--reduction", default="",
+                   help="Seurat reduction to expose as obsm['X_umap']. Empty "
+                        "means compute one here, WITHOUT batch correction.")
     args = p.parse_args()
 
     in_dir = Path(args.in_dir)
@@ -51,6 +54,17 @@ def main():
     adata.raw = adata_raw
 
     # Re-attach Seurat reductions if exported by the R step.
+    #
+    # Every reduction is imported under obsm["X_<name>"]; exactly one of them
+    # becomes X_umap, the key every plotting call actually reads. That choice
+    # used to be made by name prefix -- anything starting with "umap" -- which
+    # matches NONE of the names Seurat produces in practice: wnn.umap,
+    # rna.umap, umap.harmony. An object carrying three curated layouts
+    # therefore fell through to the fallback below and got a fresh PCA-UMAP
+    # with no batch correction, which on a multi-sample integrated object is
+    # the wrong layout and reports itself only as one line in this log.
+    chosen = args.reduction.strip()
+    imported = []
     reductions_file = in_dir / "reductions.txt"
     if reductions_file.exists():
         reductions = [r for r in reductions_file.read_text().splitlines() if r]
@@ -60,13 +74,38 @@ def main():
                 continue
             emb = pd.read_csv(emb_path, sep="\t").set_index("barcode")
             emb = emb.loc[adata.obs_names]
-            key = "X_umap" if rname.lower().startswith("umap") else f"X_{rname.lower()}"
+            key = f"X_{rname.lower()}"
             adata.obsm[key] = emb.to_numpy()
+            imported.append(rname)
             print(f"[build_anndata] Imported reduction '{rname}' -> obsm['{key}']")
 
-    # If no UMAP came from Seurat, compute a quick one so visualization works.
+    if chosen:
+        # Assigned AFTER the loop, so a reduction literally named "umap" (which
+        # lands on X_umap by the rule above) cannot outrank the chosen one.
+        key = f"X_{chosen.lower()}"
+        if key not in adata.obsm:
+            raise SystemExit(
+                f"[build_anndata] input.reduction {chosen!r} was not exported "
+                f"by step 01.\n"
+                f"  exported: {', '.join(imported) if imported else '(none)'}\n"
+                f"  Set input.reduction to one of those, or leave it empty to "
+                f"compute a UMAP here.")
+        adata.obsm["X_umap"] = adata.obsm[key]
+        print(f"[build_anndata] X_umap <- '{chosen}'  (input.reduction)")
+
+    # Last resort: nothing was chosen and nothing already occupies X_umap.
+    # Say plainly what this produces, because the layout is an unintegrated
+    # PCA-UMAP of the RNA matrix -- reasonable for one sample, misleading for
+    # anything integrated, and indistinguishable from a curated layout once it
+    # is sitting in X_umap.
     if "X_umap" not in adata.obsm:
-        print("[build_anndata] No UMAP in Seurat object — computing one for plots.")
+        print("[build_anndata] WARNING: no reduction chosen and no X_umap — "
+              "computing one from the RNA matrix, with NO batch correction.")
+        if imported:
+            print("[build_anndata]          this object HAS reductions: "
+                  + ", ".join(imported))
+            print("[build_anndata]          set input.reduction to the one you "
+                  "want plotted.")
         try:
             adata_tmp = adata.copy()
             sc.pp.highly_variable_genes(adata_tmp, flavor="seurat", n_top_genes=2000)

@@ -111,8 +111,58 @@
   - Open, not decided: whether step NUMBERS survive as the interface
     (`--from 7`) once rule names exist.
 
-Status: end-to-end on human/hg38 small-scale PBMC only. **Mouse has never been
-run** -- the generator is verified, no mouse object has met step 1. The
-PARAMETERS have never been examined: the topic-count sweep, the DAR thresholds
-and the search-space width are as shipped. A green run says the plumbing holds,
-not that the numbers mean anything.
+20260909: `input.reduction` -- every figure so far was drawn on a layout
+          nobody chose
+  - Found from the mouse run: a multi-sample INTEGRATED object, and the figures
+    showed an unintegrated layout. The cause was not a wrong reduction being
+    picked. It was that none was.
+  - `scenicplus_02_build_anndata.py` decided which reduction became `X_umap` --
+    the key every plotting call reads -- by name prefix: anything starting with
+    "umap". Seurat produces `wnn.umap`, `rna.umap`, `atac.umap`,
+    `umap.harmony`. None of them start with "umap". So the test matched nothing
+    on any object this pipeline has ever been given, the fallback fired, and a
+    fresh PCA-UMAP of the RNA matrix with no batch correction took the key. The
+    human PBMC run's own log says so in one line that reads like an
+    observation rather than a warning:
+
+    ```
+    [build_anndata] Imported reduction 'wnn.umap' -> obsm['X_wnn.umap']
+    [build_anndata] No UMAP in Seurat object - computing one for plots.
+    ```
+
+  - **Scope: figures only, and that was checked rather than assumed.** No stage
+    between 3 and 18 reads an embedding (grep for obsm/umap across the cisTopic,
+    region-set and postprocess scripts returns nothing), and
+    `scenicplus.is_multiome: true` sends `prepare_GEX_ACC` down the
+    barcode-pairing branch, so the metacell path -- the one place SCENIC+ groups
+    cells by anything but a label -- never runs. Topics come from fragment
+    counts; DARs and RSS from `celltype_column`. No eRegulon, importance or AUC
+    value changes.
+  - Fixed as one named config key, `input.reduction`, read by three steps:
+    step 01 validates it against `Reductions(obj)` and fails in the first
+    minute if the object has no such reduction; step 02 maps every reduction to
+    `X_<name>` and assigns the chosen one to `X_umap` LAST, so a reduction
+    literally named "umap" cannot outrank it; step 20 reads the layout from
+    step 01's `embedding_<name>.tsv` rather than hoping it survived nine
+    intermediate files, and puts its name in every figure title.
+  - Step 20 also stops trusting propagation for a second reason: the eRegulon
+    object is concatenated from the AUC modalities alone and inherits no
+    embedding, so the curated layout could never have reached those panels
+    however step 02 chose it. Reading the TSV means a finished run can be
+    redrawn with `--only 20`, without recomputing any of the GRN.
+  - Gated on real data, both directions: on the PBMC export, `wnn.umap` gives an
+    `X_umap` byte-equal to the source TSV, a name the object lacks exits 1 and
+    writes nothing, and the unset case still works and now says what it did.
+    Step 20's two failure paths were made to fail on purpose -- a missing file,
+    and barcodes tagged `___pbmc` on one side only, which is the step-6 mismatch
+    of 2026-09-08 in a new place. Confirmed the added `.cfgsha` key does NOT
+    disturb an existing workspace: for a config without `input.reduction` the
+    hash is identical before and after, and changes the moment it is set.
+
+Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
+2026-09-09; artifacts not inspected here). The PARAMETERS have never been
+examined: the topic-count sweep, the DAR thresholds and the search-space width
+are as shipped. A green run says the plumbing holds, not that the numbers mean
+anything -- and every figure produced before today was drawn on a layout nobody
+chose, which is the same lesson arriving through the output rather than through
+a crash.

@@ -11,6 +11,11 @@ Plots:
   06_TF_target_count.{pdf,png}          n_target_genes per TF (bar)
   07_TF_importance_distribution.{pdf,png}  importance density per TF (top N)
   08_eGRN_network_top<N>.{pdf,png}      TF-target network for top-N TFs
+
+The layout the UMAP panels are drawn on is `input.reduction`, read from step
+01's seurat_export/embedding_<name>.tsv. With no reduction set they fall back
+to a UMAP of eRegulon activity, which is a different picture from the Seurat
+one and not a worse one -- so either way the title names which it is.
 """
 import argparse
 import warnings
@@ -73,21 +78,66 @@ def make_eRegulon_adata(md):
     return a
 
 
-def umap_celltype(adata, ct_col, out_dir):
-    if "X_umap" not in adata.obsm:
+def attach_embedding(adata, emb_dir, reduction):
+    """Put a named layout on the eRegulon object and return what it is.
+
+    The eRegulon object is concatenated from the AUC modalities alone, so it
+    inherits no embedding from the Seurat object however carefully step 02
+    chose one. Read the chosen layout from step 01's export instead of hoping
+    it propagated through nine intermediate files -- which also means this
+    step can be re-run on its own (`--only 20`) to redraw the figures of a
+    finished run without recomputing any of the GRN.
+
+    Returns a short label naming the layout, which goes on every figure.
+    """
+    reduction = (reduction or "").strip()
+    if not reduction:
+        if "X_umap" in adata.obsm:
+            return "X_umap from the MuData"
+        # No layout anywhere: a UMAP of regulon activity is a real answer here,
+        # it is just a different one from the Seurat layout. Name it so nobody
+        # reads these panels as the cell-type UMAP they know.
         sc.pp.neighbors(adata, use_rep="X")
         sc.tl.umap(adata)
+        return "UMAP of eRegulon AUC (computed here)"
+
+    path = Path(emb_dir) / f"embedding_{reduction}.tsv"
+    if not path.exists():
+        raise SystemExit(
+            f"[viz] input.reduction {reduction!r}: {path} does not exist.\n"
+            f"  Step 01 writes one embedding_<name>.tsv per reduction. Check "
+            f"the name against that directory,\n  or clear input.reduction to "
+            f"plot a UMAP of eRegulon activity instead.")
+
+    emb = pd.read_csv(path, sep="\t").set_index("barcode")
+    hit = adata.obs_names.intersection(emb.index)
+    if len(hit) != adata.n_obs:
+        # Barcodes disagreeing between the two sides is the failure this
+        # pipeline has already hit once, at step 6. Say which names are on
+        # each side rather than plotting an all-NaN layout.
+        raise SystemExit(
+            f"[viz] {len(hit)}/{adata.n_obs} cells found in {path.name}.\n"
+            f"  SCENIC+ cell:  {adata.obs_names[0]!r}\n"
+            f"  Seurat cell:   {emb.index[0]!r}\n"
+            f"  The two are named differently, so no layout can be attached.")
+    adata.obsm["X_umap"] = emb.loc[adata.obs_names].to_numpy()[:, :2]
+    return reduction
+
+
+def umap_celltype(adata, ct_col, out_dir, label):
     fig, ax = plt.subplots(figsize=(7, 6))
     sc.pl.umap(adata, color=ct_col, ax=ax, show=False, frameon=False, legend_loc="on data")
+    ax.set_title(f"{ct_col}  [{label}]")
     save(fig, out_dir, "01_umap_celltype")
 
 
-def umap_eRegulons(adata, eRegulons, out_dir):
+def umap_eRegulons(adata, eRegulons, out_dir, label):
     for er in eRegulons:
         if er not in adata.var_names:
             continue
         fig, ax = plt.subplots(figsize=(6, 5))
         sc.pl.umap(adata, color=er, ax=ax, show=False, frameon=False, cmap="viridis")
+        ax.set_title(f"{er}  [{label}]")
         save(fig, out_dir, f"02_umap_eRegulon_{er.replace('/', '_').replace(' ', '_')}")
 
 
@@ -208,6 +258,11 @@ def main():
     p.add_argument("--scplus_mdata", required=True)
     p.add_argument("--config", required=True)
     p.add_argument("--out_dir", required=True)
+    p.add_argument("--embedding_dir", default="",
+                   help="step 01's seurat_export/, holding embedding_<name>.tsv")
+    p.add_argument("--reduction", default="",
+                   help="input.reduction: which of those to plot on. Empty = "
+                        "plot on a UMAP of eRegulon activity.")
     args = p.parse_args()
 
     with open(args.config) as fh:
@@ -223,9 +278,17 @@ def main():
 
     # Build eRegulon AnnData for UMAP/RSS
     er_adata = make_eRegulon_adata(md)
+    emb_label = None
+    if er_adata is not None:
+        # Before any plotting: one layout, named, used by every panel below.
+        # Attaching it here rather than inside the first plot also fixes a
+        # latent crash -- umap_eRegulons runs even when no cell-type column is
+        # found, and used to reach sc.pl.umap with nothing in obsm.
+        emb_label = attach_embedding(er_adata, args.embedding_dir, args.reduction)
+        print(f"[viz] layout: {emb_label}", flush=True)
     if er_adata is not None and rss_var is not None:
         er_adata.obs[rss_var] = er_adata.obs[rss_var].astype("category")
-        umap_celltype(er_adata, rss_var, out_dir)
+        umap_celltype(er_adata, rss_var, out_dir, emb_label)
 
     # UMAP per top eRegulon (chosen by RSS if possible, otherwise by AUC variance)
     top_eRegulons = []
@@ -250,7 +313,7 @@ def main():
             var = pd.DataFrame(er_adata.X, index=er_adata.obs_names,
                                columns=er_adata.var_names).var()
             top_eRegulons = var.sort_values(ascending=False).head(20).index.tolist()
-        umap_eRegulons(er_adata, top_eRegulons, out_dir)
+        umap_eRegulons(er_adata, top_eRegulons, out_dir, emb_label)
 
     # heatmap-dotplots
     if rss_var is not None:
