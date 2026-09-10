@@ -305,6 +305,35 @@
     substitutes on an empty argument as well as a missing one, so the Ensembl
     fixture came out UCSC and two refusals tested nothing. Use `${2-chr}`.
 
+20260909: Snakemake workflow, increment I3 -- the GRN DAG, 18 rules
+  - `rules/grn.smk`: R06 and R08-R18, each one
+    `scenicplus_06_grn_stage.py --stage X` exactly as the driver calls it. R07
+    is I2's checking rule. `--list` prints all eighteen in step order and the
+    full DAG builds.
+  - **Dependencies taken from each stage's ARGUMENTS, not the driver's
+    ordering**, which is the entire gain. Four pairs are independent and now run
+    together: cistarget with dem, tf_to_gene with region_to_gene, the two eGRN
+    rules, the two AUCell rules. Flattening the inner snakemake gave that
+    parallelism up (`CLAUDE.md` says so); declaring real inputs recovers it
+    without bringing the inner snakemake back.
+  - **One edge the driver never declared.** R12 reads `tf_names.txt`, which R11
+    writes; sequential execution satisfied it by accident. `tests/dryrun.sh` now
+    checks the graph's SHAPE -- 18 rules, that edge, R08-after-R07,
+    R13-after-R08, and the four independent pairs -- as PROPERTIES rather than a
+    snapshot, since a snapshot breaks on every legitimate change and teaches
+    people to re-bless it.
+  - The genome pair is now a parse-time requirement rather than a warning: R08
+    cannot build a search space without it.
+  - **What cannot be gated locally:** R09 and R10 read the 45.7 GB of cisTarget
+    databases, so I3's real test is a cluster run. Established here: the DAG, the
+    parameter slices, and that each command is the driver's.
+  - Worth remembering from proving the DAG check could fail: the FIRST attempt
+    tested nothing. Removing a line by its first match hit the PRODUCING rule's
+    output, not the consuming rule's input, so the graph failed to build for an
+    unrelated reason and the check never ran. The second attempt asserted the
+    anchor was unique first. That is the replace-first-match trap, and it cost a
+    minute here rather than a cluster run.
+
 Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
 2026-09-09; artifacts not inspected here). The PARAMETERS have never been
 examined: the topic-count sweep, the DAR thresholds and the search-space width

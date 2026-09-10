@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
-# I0 gate for the Snakemake workflow: does it parse, and does it refuse what it
+# Gate for the Snakemake workflow (I0-I3): does it parse, and does it refuse what it
 # is supposed to refuse.
 #
 #   tests/dryrun.sh
@@ -36,10 +36,25 @@ cd "$WORK/ws"
 # behaviour, and the reason this stand-in exists. Its contents never matter:
 # every check here is a dry run or a refusal, so no rule ever opens it.
 touch "$WORK/ws/stand-in.rds"
+
+# The GRN rules require the genome pair, the cisTarget databases and the motif
+# table as real INPUTS, so the DAG cannot be built while the template holds
+# placeholder paths. Stand-ins for all of them: nothing here runs a rule, so no
+# file is ever opened. Requiring them is the point -- a config that names a
+# missing database should fail at DAG build, not after a queue wait.
+for f in stand-in.rds genome_annotation.tsv chromsizes.tsv ctx.feather dem.feather motifs.tbl; do
+    touch "$WORK/ws/$f"
+done
 python3 - <<PY
 import yaml, pathlib
 c = yaml.safe_load(open("config/config.yaml"))
-c["input"]["seurat_rds"] = "$WORK/ws/stand-in.rds"
+i = c["input"]
+i["seurat_rds"]        = "$WORK/ws/stand-in.rds"
+i["genome_annotation"] = "$WORK/ws/genome_annotation.tsv"
+i["chromsizes"]        = "$WORK/ws/chromsizes.tsv"
+i["ctx_db"]            = "$WORK/ws/ctx.feather"
+i["dem_db"]            = "$WORK/ws/dem.feather"
+i["motif_annotations"] = "$WORK/ws/motifs.tbl"
 pathlib.Path("config/config.yaml").write_text(yaml.safe_dump(c))
 PY
 
@@ -96,14 +111,61 @@ restore
 # 6. half a genome pair, which is worse than none: the download that would fill
 #    the gap cannot produce chromsizes for anyone, so a config with only the
 #    annotation set looks configured and is not.
-edit_cfg 'c["input"]["genome_annotation"] = "/nonexistent/annotation.tsv"'
+edit_cfg 'c["input"]["chromsizes"] = ""'
 if run_sm; then say FAIL "only ONE of the genome pair is refused"
 elif grep -q "BOTH or NEITHER" "$WORK/out"; then
      say ok "only ONE of the genome pair is refused, saying both or neither"
 else say FAIL "refused, but not with the both-or-neither reason"; fi
 restore
 
-# 7. the runner's own refusals
+# 7. the DAG's SHAPE, not just that it builds.
+#
+# The whole argument for I3 is that declaring each stage's real inputs recovers
+# the parallelism flattening gave up. That is a claim about edges, so check
+# edges. Properties rather than a snapshot of the whole graph: a snapshot breaks
+# on every legitimate change and teaches people to re-bless it.
+snakemake --snakefile "$SCENICPLUS_PATH/Snakefile" --dag >"$WORK/dag.dot" 2>/dev/null
+python3 - "$WORK/dag.dot" <<'PY' >"$WORK/dag.txt" 2>&1
+import re, sys
+t = open(sys.argv[1]).read()
+label = dict(re.findall(r'(\d+)\[label = "([^"\\]+)', t))
+deps = {}
+for a, b in re.findall(r'(\d+) -> (\d+)', t):          # a -> b : b needs a
+    deps.setdefault(label.get(b, b), set()).add(label.get(a, a))
+rules = {r for r in label.values() if r.startswith("R")}
+checks = [
+    ("all 18 step rules are in the graph", len(rules) == 18, sorted(rules)),
+    # The non-obvious edge: tf_to_gene reads tf_names.txt, which prepare_menr
+    # writes. The driver satisfied this by being sequential, not by declaring it.
+    ("R12 needs R11, for tf_names.txt",
+     "R11_prepare_menr" in deps.get("R12_tf_to_gene", set()), None),
+    ("R08 needs R07, so the genome pair is checked first",
+     "R07_genome_annot" in deps.get("R08_search_space", set()), None),
+    ("R13 needs R08, for the search space",
+     "R08_search_space" in deps.get("R13_region_to_gene", set()), None),
+    # The parallelism the increment exists for.
+    ("R09 and R10 do not depend on each other",
+     "R10_dem" not in deps.get("R09_cistarget", set())
+     and "R09_cistarget" not in deps.get("R10_dem", set()), None),
+    ("R14 and R15 do not depend on each other",
+     "R15_egrn_extended" not in deps.get("R14_egrn_direct", set())
+     and "R14_egrn_direct" not in deps.get("R15_egrn_extended", set()), None),
+    ("R16 and R17 do not depend on each other",
+     "R17_aucell_extended" not in deps.get("R16_aucell_direct", set())
+     and "R16_aucell_direct" not in deps.get("R17_aucell_extended", set()), None),
+]
+bad = [(n, d) for n, ok, d in checks if not ok]
+for n, d in bad:
+    print(f"{n} :: FAILED" + (f" :: {d}" if d else ""))
+sys.exit(1 if bad else 0)
+PY
+if [[ $? -eq 0 ]]; then
+    say ok "the DAG has the right shape: 18 rules, and the four pairs stay parallel"
+else
+    say FAIL "the DAG's shape is wrong"; sed -n '1,5p' "$WORK/dag.txt"
+fi
+
+# 8. the runner's own refusals
 RUN="$SCENICPLUS_PATH/scripts/scenicplus.run.sh"
 
 # `--lsf` is environment-dependent, so assert the contract rather than one
@@ -124,9 +186,12 @@ else
     fi
 fi
 
-SCENICPLUS_SKIP_CHECK=1 "$RUN" -f 7 -n >/dev/null 2>&1
-[[ $? -eq 2 ]] && say ok "-f on a step with no rule refuses instead of forcing nothing" \
-               || say FAIL "-f on a step with no rule refuses instead of forcing nothing"
+# Step 20 has no rule until I4. Update this number as increments land: a `-f`
+# that silently forces nothing is what the lookup exists to prevent, so the
+# check has to point at a step that genuinely has no rule.
+SCENICPLUS_SKIP_CHECK=1 "$RUN" -f 20 -n >/dev/null 2>&1
+[[ $? -eq 2 ]] && say ok "-f 20, which has no rule yet, refuses instead of forcing nothing" \
+               || say FAIL "-f 20 did not refuse, though no R20_ rule exists"
 
 # The other direction, which only became testable once rules existed: a step
 # number must RESOLVE to its rule. Checking only the refusal would leave the

@@ -393,6 +393,47 @@ initially "passed" because the HARNESS was wrong -- `${2:-chr}` substitutes on
 an empty argument as well as a missing one, so the Ensembl fixture came out
 UCSC. Reading a gate's failures before its successes is what caught it.
 
+### I3 is built, 2026-09-09 -- and it recovers the parallelism flattening cost
+
+`rules/grn.smk`: R06 and R08-R18, each one `scenicplus_06_grn_stage.py --stage X`
+exactly as the driver calls it. R07 is I2's checking rule, not this file's.
+Eighteen rules now exist, `--list` prints them in step order, and the full DAG
+builds.
+
+**The dependencies come from each stage's ARGUMENTS, not from the driver's
+ordering**, and that is the whole gain. Verified by reading the graph itself
+rather than by assertion:
+
+```
+R06 needs R02, R04          R12 needs R06, R11
+R07 needs R01               R13 needs R06, R08
+R08 needs R06, R07          R14/R15 need R11, R12, R13
+R09 needs R05               R16 needs R06, R14
+R10 needs R05               R17 needs R06, R15
+R11 needs R06, R09, R10     R18 needs R06, R14, R15, R16, R17
+```
+
+Four pairs are independent and will run together: cistarget with dem,
+tf_to_gene with region_to_gene, the two eGRN rules, the two AUCell rules. The
+driver runs all thirteen in a line because flattening the inner snakemake gave
+that up; declaring real inputs gets it back without re-introducing anything.
+
+**One edge was not obvious and the driver never declared it.** R12 reads
+`tf_names.txt`, which R11 writes. Sequential execution satisfied that by
+accident. `tests/dryrun.sh` now checks the graph's SHAPE -- the 18 rules, that
+edge, R08-after-R07, R13-after-R08, and the four independent pairs -- as
+properties rather than as a snapshot, because a snapshot breaks on every
+legitimate change and teaches people to re-bless it. Removing R12's `tf_names`
+input turns exactly that check red.
+
+**What cannot be gated here.** R09 and R10 read the 45.7 GB cisTarget
+databases, so I3's real test is a cluster run and nothing on this workstation
+substitutes for it. What IS established: the DAG, the parameter slices, and that
+every rule's command is the driver's.
+
+**The genome pair is now mandatory**, a parse-time refusal rather than I2's
+warning, because R08 cannot build a search space without it.
+
 ### Two things this plan got wrong, found by building it
 
 **1. Snakemake's `code` trigger does NOT cover an external script.** The plan
