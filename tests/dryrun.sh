@@ -83,9 +83,24 @@ restore
 
 # 6. the runner's own refusals
 RUN="$SCENICPLUS_PATH/scripts/scenicplus.run.sh"
-SCENICPLUS_SKIP_CHECK=1 "$RUN" --lsf >/dev/null 2>&1
-[[ $? -eq 2 ]] && say ok "--lsf refuses until the profile exists (I5)" \
-               || say FAIL "--lsf refuses until the profile exists (I5)"
+
+# `--lsf` is environment-dependent, so assert the contract rather than one
+# outcome: with the executor plugin present it must build a profile invocation,
+# and without it it must refuse WITH the install line rather than fall back to
+# running everything on the submit host. Checking only one of those would pass
+# vacuously on whichever machine happens to run this.
+if snakemake --executor cluster-generic --help >/dev/null 2>&1; then
+    SCENICPLUS_SKIP_CHECK=1 "$RUN" --lsf -n >/dev/null 2>&1
+    [[ $? -eq 0 ]] && say ok "--lsf plans through profiles/lsf (executor present)" \
+                   || say FAIL "--lsf failed even though the executor is installed"
+else
+    out="$(SCENICPLUS_SKIP_CHECK=1 "$RUN" --lsf 2>&1)"; rc=$?
+    if [[ $rc -eq 2 ]] && grep -q "cluster-generic" <<<"$out"; then
+        say ok "--lsf refuses and names the missing executor (not installed here)"
+    else
+        say FAIL "--lsf did not refuse cleanly without the executor (exit $rc)"
+    fi
+fi
 
 SCENICPLUS_SKIP_CHECK=1 "$RUN" -f 7 -n >/dev/null 2>&1
 [[ $? -eq 2 ]] && say ok "-f on a step with no rule refuses instead of forcing nothing" \

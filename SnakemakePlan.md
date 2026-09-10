@@ -127,25 +127,39 @@ at DAG build, before a job is submitted.
 
 ## Layout
 
+Marked against what exists as of 2026-09-09: [x] built, [ ] pending, [-]
+superseded.
+
 ```
-Snakefile                  orchestration only: configfile, validate(), the
-                           species/assembly resolution, includes, rule all,
-                           onsuccess/onerror -> provenance
-rules/common.smk           helpers, NO rules: STAGES + stage_path(), resource
-                           tiers, the species table, log_path()
-rules/prepare.smk          R01-R05
-rules/genome.smk           R07 + the assembly record  <-- see below
-rules/grn.smk              R06, R08-R18 (all via scenicplus_06_grn_stage.py)
-rules/report.smk           R19-R20 (+ the report.html rule at I6)
-schemas/config.schema.yaml the contract
-Template/config.yml        the shipped template, matching the schema key for key
-profiles/lsf/config.yaml   + lsf-status.sh, as scRNA_LimLab_Snake has
-scripts/                   unchanged: the 8 step scripts, the helper, the
-                           genome-file generator, scenicplus_check.sh
-scripts/scenicplus.run.sh  the runner (LSF default, -l local, -n dry run, -j, -p)
-scripts/scenicplus.init.sh scaffold a workspace (today's scenicplus_init.sh)
-tests/                     schema tests + a dry-run matrix, as over there
-docs/TODO.md, REFACTOR.md  open work and the record
+[x] Snakefile                  orchestration only: configfile, validate(), the
+                               species resolution, includes, rule all,
+                               onstart/onsuccess/onerror
+[x] rules/common.smk           helpers, NO rules: STAGES + stage_path(),
+                               resource tiers, the species table, log_path()
+[ ] rules/prepare.smk          R01-R05                                     I1
+[ ] rules/genome.smk           R07 + the assembly record  <-- see below     I2
+[ ] rules/grn.smk              R06, R08-R18 (via scenicplus_06_grn_stage.py) I3
+[ ] rules/report.smk           R19-R20 (+ the report.html rule at I6)       I4
+[x] schemas/config.schema.yaml the contract
+[-] Template/config.yml        SUPERSEDED: one template, not two. The workflow
+                               reads the same config/config.yaml the bash
+                               driver reads. See "What changed", above.
+[x] profiles/lsf/              config.yaml + lsf-status.sh, adapted from
+                               scRNA_LimLab_Snake's. Early, so the executor
+                               could be tested; the RESOURCE numbers are I5.
+[x] scripts/                   unchanged: the 8 step scripts, the helper, the
+                               genome-file generator, scenicplus_check.sh
+[x] scripts/scenicplus.run.sh  the runner (-n, -j, -p, -f N, --lsf)
+[ ] scripts/scenicplus.init.sh scaffold a workspace. NOT renamed: today's
+                               scenicplus_init.sh serves both drivers and
+                               writes the one config they share. Renaming it
+                               is I8's job, with the driver it belongs to.
+[x] tests/                     test_config_schema.py, dryrun.sh,
+                               cluster_smoke.sh + cluster_smoke/Snakefile
+[ ] docs/TODO.md, REFACTOR.md  deferred. Development.md and this file carry
+                               the record while the workflow is one increment
+                               old; splitting them now would be filing
+                               cabinets for four documents.
 ```
 
 ### Stage taxonomy
@@ -365,13 +379,29 @@ The profile is adapted from `scRNA_LimLab_Snake`'s, which has run on this
 cluster, and keeps its two expensive comments: `-M` alongside `rusage[mem]`,
 and why a status command is not optional.
 
-**Still unproven, and only the cluster can prove it:** that bsub receives the
-threads and memory a rule asks for, that `LSF_UNIT_FOR_LIMITS` makes `-M` mean
-what the profile assumes, and above all that `lsf-status.sh` detects a job LSF
-kills. Local mode substitutes a shell for bsub, so a failing job returns
-non-zero synchronously and is caught without the status command ever being
-consulted. That is the one check local mode cannot make, and it is the one
-whose absence hangs a workflow rather than failing it.
+**PROVEN ON THE CLUSTER, 2026-09-09.** `tests/cluster_smoke.sh --lsf` passed
+every check, including the two local mode cannot make:
+
+    ok   b_bigger was allocated 4 slots
+    ok   a failing job was detected and reported (exit 1)
+
+The first says `threads` reaches `bsub -n` and LSF honours it, so the
+sixteen-fold oversubscription the sibling repo hit cannot happen here by
+construction. The second says `lsf-status.sh` works against real `bjobs`
+output: bsub returns immediately, so nothing but the status command could have
+noticed that job die, and the alternative to noticing is a workflow that waits
+forever.
+
+**So I5 is unblocked.** The executor, the profile, the submit template and the
+status probe are all exercised end to end on the target cluster, with a
+four-job DAG that needs no data. What remains for I5 is the part this never
+touched: what each of the twenty steps should actually ASK for.
+
+Two branches of `lsf-status.sh` remain unexercised, both narrow: the `bhist`
+fallback for a job that leaves `bjobs` before the next poll, and the `UNKWN`
+transient. Neither can be triggered on demand. They matter only for jobs that
+finish inside one poll interval or lose contact with their host, and the code
+treats both conservatively.
 
 I0–I4 are mechanical; I5 is where the payoff lands. Stopping after I4 is
 coherent (correct, still one big job); after I5 (right-sized jobs, no report);

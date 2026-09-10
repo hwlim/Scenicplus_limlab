@@ -234,6 +234,14 @@ Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
     without `lsf-status.sh` ever being consulted. Whether a job LSF KILLS is
     detected -- as opposed to waited on forever -- is a cluster-only result, and
     so is whether bsub receives the threads a rule asked for.
+  - **Both came back green the same day**, from `cluster_smoke.sh --lsf` on
+    CCHMC: `b_bigger was allocated 4 slots`, and `a failing job was detected
+    and reported`. Threads reach `bsub -n` and LSF honours them, so the
+    sixteen-fold oversubscription from the sibling repo cannot happen here by
+    construction; and `lsf-status.sh` reads real `bjobs` output correctly,
+    since bsub returns immediately and nothing else could have noticed that job
+    die. I5 is unblocked, and what is left of it is the part none of this
+    touched: what each of the twenty steps should actually ask for.
 
 Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
 2026-09-09; artifacts not inspected here). The PARAMETERS have never been

@@ -28,6 +28,11 @@
 #                                        # "... appears to be corrupted")
 #   SCP_FROM=1  ./install_cchmc.sh ...   # skip phase 0; the conda layer is done
 #   SCP_FROM=2  ./install_cchmc.sh ...   # skip phases 0-1; only pip scenicplus
+#   SCP_FROM=3  ./install_cchmc.sh ...   # skip phases 0-2; only the cluster
+#                                        # executor plugin, for an env built
+#                                        # before phase 3 existed
+#   SCP_NO_CLUSTER=1 ./install_cchmc.sh ...  # omit the executor plugin; the
+#                                        # workflow then runs locally only
 #   SCP_BUILD_TOOLCHAIN=1 ./install_cchmc.sh ...  # glibc < 2.28: pull rust into
 #                                        # the env instead of using a newer node
 #
@@ -316,8 +321,39 @@ fi
 
 fi
 
+if [[ "$SCP_FROM" -gt 2 ]]; then
+    echo "### SCP_FROM=$SCP_FROM -> skipping phase 2 (scenicplus)"
+else
 echo "### phase 2: scenicplus (isolation ON)"
 "$PY" -m pip install "scenicplus @ git+https://github.com/aertslab/scenicplus.git"
+fi
+
+# --- phase 3: cluster execution ----------------------------------------------
+# snakemake 8 removed `--cluster` and moved submission into executor PLUGINS,
+# and ships none. Without this the Snakemake workflow (Snakefile, profiles/lsf)
+# runs locally and NOWHERE ELSE. The bash driver does not need it; it is
+# installed anyway, because an environment that cannot submit is not the
+# environment RUNBOOK.md describes.
+#
+# The version is not free, and this is the whole reason it is pinned here rather
+# than left to pip. scenicplus pins snakemake AND its four interface packages
+# with `==`, and 1.0.9 of this plugin requires the executor interface at >=9.0.0
+# -- which pip can only reach by breaking the scenicplus install rather than
+# upgrading it. 1.0.8 is the newest that fits inside those pins, verified with
+# `pip install --dry-run`: every dependency already satisfied, one package added,
+# nothing moved.
+#
+# AFTER phase 2 on purpose, so pip sees the pinned interface already in place
+# rather than resolving the two against each other.
+#
+#   SCP_FROM=3 ./install_cchmc.sh <prefix>   # add this to an existing env
+#   SCP_NO_CLUSTER=1 ...                     # skip it
+if [[ "${SCP_NO_CLUSTER:-0}" == "1" ]]; then
+    echo "### SCP_NO_CLUSTER=1 -> skipping phase 3; this env will run locally only"
+else
+    echo "### phase 3: cluster executor plugin"
+    "$PY" -m pip install "snakemake-executor-plugin-cluster-generic==1.0.8"
+fi
 
 echo "### verify"
 # Run from / so the env PREFIX DIRECTORY cannot be picked up as a namespace
@@ -347,6 +383,17 @@ for m in ("scenicplus", "pycistarget", "pycisTopic", "pybedtools",
 raise SystemExit(1 if bad else 0)
 PY
 "$ENV_PREFIX/bin/Rscript" -e 'for (p in c("Seurat","Signac","Matrix","optparse")) cat(sprintf("  %-9s %s\n", p, as.character(packageVersion(p))))' 2>&1 | grep -v '^Loading'
+
+# Advisory, not a gate. An env built with SCP_NO_CLUSTER=1 is a legitimate env
+# -- the bash driver needs none of this -- so report the capability and let the
+# caller decide. Asking snakemake itself is the honest check: a plugin can be
+# present as a package and still fail to register.
+if "$ENV_PREFIX/bin/snakemake" --executor cluster-generic --help >/dev/null 2>&1; then
+    echo "  cluster execution: available (snakemake --executor cluster-generic)"
+else
+    echo "  cluster execution: NOT available -- the Snakemake workflow will run"
+    echo "                     locally only. Add it with SCP_FROM=3."
+fi
 
 # The console script, and a repair when it is absent. scenicplus 1.0a2 declares
 #   [project.scripts] scenicplus = "scenicplus.cli.scenicplus:main"

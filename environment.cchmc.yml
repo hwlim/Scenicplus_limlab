@@ -50,6 +50,11 @@
 #    snakemake==8.5.5, so it arrives transitively through pip. It cannot be
 #    dropped from the environment even though the pipeline no longer invokes it
 #    (see FlattenIdea.md, which is wrong on this point).
+#
+#    The same applies to the CLUSTER EXECUTOR PLUGIN the Snakemake workflow
+#    needs. It is pip-only, and its version is decided by scenicplus's pins
+#    rather than by us, so it belongs in install_cchmc.sh phase 3 and NOT in
+#    this file. Nothing about the conda layer changes for it.
 
 name: scenicplus_limlab_cchmc
 channels:

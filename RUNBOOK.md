@@ -79,6 +79,14 @@ Takes ~20 min; phase 2 pulls ~200 packages from PyPI. **If the cluster gates
 egress or needs an index mirror, that is where it stops** — the conda layer will
 already be complete.
 
+Phase 3 adds one pip package, `snakemake-executor-plugin-cluster-generic`, which
+the Snakemake workflow needs to submit jobs and the bash driver does not use at
+all. `SCP_NO_CLUSTER=1` skips it; `SCP_FROM=3` adds it to an environment built
+before phase 3 existed. Its version is pinned deliberately: scenicplus pins
+snakemake and its plugin interfaces with `==`, so a newer plugin can only be
+installed by breaking the scenicplus install. `install_cchmc.sh` and
+`profiles/lsf/config.yaml` both carry the detail.
+
 **Install on the node class you will run on.** Login and compute nodes can run
 different OS images and therefore different glibc, and pip picks wheels for the
 glibc of the host it runs on. On a host below glibc 2.28, three pins
