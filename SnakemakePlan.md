@@ -344,6 +344,55 @@ plasma socket does not work in this sandbox) and need the cluster.
 execution*, and R02 followed as *input files updated by another job*. Nothing
 else moved.
 
+### I2 is built and gated, 2026-09-09 -- but R07 does NOT generate
+
+`rules/genome.smk` + `scripts/scenicplus_genome_prepare.py`. The rule block
+sketched above, with `script: scenicplus_make_genome_files.R`, is SUPERSEDED,
+and by a measurement rather than a preference: the SCENIC+ environment has none
+of the R stack that script needs. `EnsDb.Hsapiens.v86`, `EnsDb.Mmusculus.v79`,
+both BSgenome packages, `ensembldb` and `AnnotationFilter` are all absent. A
+generating rule could not run there, and adding two genomes to an environment
+whose pin set took a week to settle is not a trade this increment should make.
+
+So generation stays what it already was: a tool, run once per assembly, in the
+`scRNA_LimLab_Snake` environment. That is also the right shape -- the files
+depend only on species and assembly, exactly like the 45.7 GB of cisTarget
+databases nobody expects the pipeline to build. Decision 1's shared reference
+directory is satisfied by pointing `input.genome_annotation` /
+`input.chromsizes` into one, with no new config key.
+
+**What R07 does instead is the part that was never done at all: four checks, in
+the order that a failure is cheapest to understand.**
+
+1. **Shape.** Chromsizes needs its tab-separated header; the annotation needs
+   the seven columns `get_search_space` reads by name.
+2. **Assembly.** Chromosome 1's length IS the assembly, so one number catches
+   the failure that otherwise reaches the results in silence. A GRCm39
+   chromsizes under `assembly: mm10` is refused and told it is GRCm39.
+3. **Naming.** UCSC against Ensembl, across all THREE files the search space
+   joins -- including this run's actual peaks.
+4. **Overlap.** The annotation's chromosomes against the peaks' chromosomes.
+   Agreeing on style is not the same as agreeing, and style agreement is all
+   the existing diagnostic could check.
+
+Then it copies, never before, and writes `QC/assembly.json`: species, assembly,
+chr1 length and what that length matches, naming style, chromosome and
+transcript counts, which peak chromosomes have no annotation, and the sha256 of
+both sources. Nothing recorded that before, which is how the GRCm39 problem
+stayed invisible for four months.
+
+**The consequence to accept:** R07 now depends on R01, because the peak
+chromosomes come from the export. The driver's step 7 had no such dependency --
+and no such check.
+
+**Gated.** The real hg38 pair from the validated PBMC run passes and produces
+the record (chr1 = 248,956,422, UCSC throughout, 23 of 23 peak chromosomes
+annotated). `tests/genome_checks.sh` then makes every check fail on purpose,
+including that a refused pair leaves nothing behind. Two of those cases
+initially "passed" because the HARNESS was wrong -- `${2:-chr}` substitutes on
+an empty argument as well as a missing one, so the Ensembl fixture came out
+UCSC. Reading a gate's failures before its successes is what caught it.
+
 ### Two things this plan got wrong, found by building it
 
 **1. Snakemake's `code` trigger does NOT cover an external script.** The plan

@@ -51,6 +51,7 @@ shell.prefix("set -o pipefail; ")
 
 include: "rules/common.smk"
 include: "rules/prepare.smk"
+include: "rules/genome.smk"
 
 SPECIES_INFO = species_info(config)
 
@@ -61,10 +62,16 @@ SPECIES_INFO = species_info(config)
 # Until then it targets the furthest stage that exists, which advances one
 # increment at a time.
 #
-# I1: the region sets, which is where R01-R05 end and where I3's GRN rules will
-# pick up. An empty target list is a silent no-op -- the failure mode this
-# workflow exists to remove -- so onstart still says so if it ever becomes one.
+# I1: the region sets, where R01-R05 end and I3's GRN rules will pick up.
+# I2: the checked genome pair, when the config supplies one. Conditional because
+# nothing consumes it until I3 -- rules/genome.smk explains why that is a
+# warning now and becomes a hard requirement then.
+#
+# An empty target list is a silent no-op -- the failure mode this workflow exists
+# to remove -- so onstart still says so if it ever becomes one.
 TARGETS = [stage_path("cistopic", "region_sets")]
+if GENOME_SUPPLIED:
+    TARGETS += GENOME_FILES
 
 
 rule all:
