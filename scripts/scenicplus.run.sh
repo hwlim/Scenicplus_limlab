@@ -7,6 +7,8 @@
 #
 #   scenicplus.run.sh -n                # dry run: print the plan, do nothing
 #   scenicplus.run.sh -j 8              # run locally on 8 cores
+#   scenicplus.run.sh --lsf             # submit each rule via profiles/lsf
+#   scenicplus.run.sh --lsf -j 20       # ... at most 20 cluster jobs at once
 #   scenicplus.run.sh -p                # also print each shell command
 #   scenicplus.run.sh -f 7              # force from step 7 (rule R07_*) onward
 #   scenicplus.run.sh -- --forceall     # anything after -- goes to snakemake
@@ -20,9 +22,9 @@
 # driver: a bad environment would otherwise be discovered once per rule, in
 # twenty separate jobs, each after its own queue wait.
 #
-# STATUS: increment I0. Local execution only. The LSF profile arrives with I5,
-# and `--lsf` refuses until then rather than silently running everything on the
-# submit host.
+# STATUS: increment I0. `--lsf` uses profiles/lsf via the cluster-generic
+# executor, which is proven on CCHMC but has no step rules to schedule yet. I5
+# is where the per-rule resource numbers arrive.
 # -----------------------------------------------------------------------------
 set -euo pipefail
 
@@ -60,18 +62,24 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+PROFILE="$SCENICPLUS_PATH/profiles/lsf"
 if [[ "$LSF" -eq 1 ]]; then
-    # Not merely unbuilt: snakemake 8 moved cluster submission into executor
-    # PLUGINS, and this environment ships none -- `--executor` offers only
-    # local, dryrun and touch. The version is pinned by scenicplus itself
-    # (snakemake==8.5.5), so this is a dependency decision, not a flag.
-    echo "[scenicplus.run] ERROR: this environment cannot submit cluster jobs." >&2
-    echo "  snakemake 8.5.5 ships no executor plugin here; --executor offers" >&2
-    echo "  only local, dryrun, touch. I5 of SnakemakePlan.md covers what adding" >&2
-    echo "  one would mean." >&2
-    echo "  For a real cluster run today: scripts/scenicplus_run_lsf.sh, which" >&2
-    echo "  drives the bash pipeline as a single LSF job." >&2
-    exit 2
+    # snakemake 8 moved cluster submission into executor PLUGINS and ships
+    # none, so this can be missing even in a healthy environment. Ask snakemake
+    # rather than checking for the package: a plugin can be installed and still
+    # fail to register.
+    if ! snakemake --executor cluster-generic --help >/dev/null 2>&1; then
+        echo "[scenicplus.run] ERROR: the cluster-generic executor is not installed." >&2
+        echo "  Add it to this environment:" >&2
+        echo "    SCP_FROM=3 ./install_cchmc.sh <prefix>" >&2
+        echo "  or directly:" >&2
+        echo "    PIP_USER=0 pip install snakemake-executor-plugin-cluster-generic==1.0.8" >&2
+        echo "  1.0.9 wants an interface version scenicplus pins away from; see" >&2
+        echo "  profiles/lsf/config.yaml." >&2
+        exit 2
+    fi
+    [[ -f "$PROFILE/config.yaml" ]] || {
+        echo "[scenicplus.run] ERROR: $PROFILE/config.yaml not found." >&2; exit 2; }
 fi
 
 # --- Preflight ---------------------------------------------------------------
@@ -85,7 +93,16 @@ fi
 # missing from the second one silently keeps the first one's value. Passing the
 # same path twice is harmless but teaches the wrong habit, and passing a
 # different one is a trap. The workspace's config is the config.
-ARGS=(--snakefile "$SNAKEFILE" --cores "$JOBS")
+ARGS=(--snakefile "$SNAKEFILE")
+if [[ "$LSF" -eq 1 ]]; then
+    # --profile carries the executor, the bsub template, the status command and
+    # the default resources. `jobs` comes from the profile too, so -j here means
+    # concurrent CLUSTER JOBS rather than local cores.
+    ARGS+=(--profile "$PROFILE")
+    [[ "$JOBS" -ne 1 ]] && ARGS+=(--jobs "$JOBS")
+else
+    ARGS+=(--cores "$JOBS")
+fi
 [[ "$DRY"   -eq 1 ]] && ARGS+=(--dry-run)
 [[ "$PRINT" -eq 1 ]] && ARGS+=(--printshellcmds)
 
