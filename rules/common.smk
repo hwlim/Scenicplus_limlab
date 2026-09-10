@@ -12,6 +12,8 @@
 # interpolations had to be found and changed at once.
 # =============================================================================
 
+import shlex
+
 # --- Stage taxonomy ----------------------------------------------------------
 # Numbered by PIPELINE STAGE, never by tool. SCENIC+ is linear and single
 # sample, so it needs fewer stages than the multi-modality pipeline this is
@@ -54,6 +56,93 @@ def log_path(rule_name):
     truncation would race the LSF epilogue that keeps being appended.
     """
     return os.path.join(stage_dir("logs"), f"{rule_name}.log")
+
+
+def opt_arg(flag, value):
+    """`--flag value`, or nothing at all when the value is empty.
+
+    Do NOT write `--flag {params.x:q}` for a value that can be empty.
+    Snakemake's `:q` renders an empty string as NOTHING, not as `''` --
+    measured:
+
+        params: empty="", full="x"
+        shell:  "echo A {params.empty:q} B {params.full:q} C"
+        ->      echo A  B x C
+
+    so the flag loses its argument and swallows whatever came next. R01 died
+    exactly that way: `--celltype_scope '' --reduction ''` reached optparse as
+    `--celltype_scope --reduction`, and optparse reported that
+    `celltype_scope` requires an argument -- an error about the flag AFTER the
+    one that was actually wrong.
+
+    Every option this is used for defaults to empty in the script itself, so
+    omitting the flag is exactly equivalent to passing an empty one.
+    """
+    v = "" if value is None else str(value)
+    return f"{flag} {shlex.quote(v)}" if v else ""
+
+
+def script_path(name):
+    """A shipped script, addressed through the workflow's own directory.
+
+    DECLARE IT AS AN `input:`, NOT A `params:`. Snakemake's `code` rerun
+    trigger covers a rule's own text, NOT the content of a script the rule
+    shells out to -- measured: edit the script a rule calls and snakemake
+    reports "Nothing to be done". As an input, the same edit reports "updated
+    input files" and the rule re-runs.
+
+    That distinction is the whole reason this workflow exists. The bash driver
+    hashes CONFIG and not CODE, which is how a fixed step 3 never re-ran and
+    tagged cell names survived the fix. Putting the script in `params` would
+    have reproduced that bug faithfully.
+
+    Not $SCENICPLUS_PATH: the workflow already knows where it lives, and a rule
+    that depends on an environment variable is a rule that behaves differently
+    depending on who launched it.
+    """
+    p = os.path.join(workflow.basedir, "scripts", name)
+    if not os.path.exists(p):
+        raise FileNotFoundError(f"no such script: {p}")
+    return p
+
+
+def cfg_params(*keys):
+    """The config values a rule's script reads, as a params dict.
+
+    THIS IS THE RERUN TRIGGER, and it is not decoration. The step scripts take
+    `--config` and read the file themselves, so from Snakemake's point of view
+    the config is neither an input nor a param, and editing it changes NOTHING.
+    That exact shape is a live bug in the sibling pipeline, where one modality
+    passes config values inline and the other passes only the filename: a config
+    edit re-runs the first and is a silent no-op for the second.
+
+    Declaring the values here puts them in the `params` trigger, so changing
+    `cistopic.n_topics` re-runs topic modeling and nothing else. The key lists
+    come from the bash driver's own `.cfgsha` slices, which already had to work
+    this out per step -- reusing them means the two drivers agree about what
+    each step depends on.
+
+    Dotted keys, missing ones omitted, so a config without an optional key
+    hashes the same as it did before that key existed.
+    """
+    out = {}
+    for k in keys:
+        cur, ok = config, True
+        for part in k.split("."):
+            if isinstance(cur, dict) and part in cur:
+                cur = cur[part]
+            else:
+                ok = False
+                break
+        if ok:
+            out[k] = cur
+    return out
+
+
+def n_cpu():
+    """Threads for the steps that take --n_cpu. One place, so a rule and the
+    value it passes to the script cannot disagree."""
+    return int(config.get("resources", {}).get("n_cpu", 1))
 
 
 # --- Species vocabularies ----------------------------------------------------

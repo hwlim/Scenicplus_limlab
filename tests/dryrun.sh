@@ -31,6 +31,18 @@ mkdir -p "$WORK/ws/config"
 cp "$SCENICPLUS_PATH/config/config.yaml" "$WORK/ws/config/config.yaml"
 cd "$WORK/ws"
 
+# R01 declares the .rds as an INPUT, so the DAG cannot be built while
+# input.seurat_rds is the template's placeholder path -- which is correct
+# behaviour, and the reason this stand-in exists. Its contents never matter:
+# every check here is a dry run or a refusal, so no rule ever opens it.
+touch "$WORK/ws/stand-in.rds"
+python3 - <<PY
+import yaml, pathlib
+c = yaml.safe_load(open("config/config.yaml"))
+c["input"]["seurat_rds"] = "$WORK/ws/stand-in.rds"
+pathlib.Path("config/config.yaml").write_text(yaml.safe_dump(c))
+PY
+
 FAIL=0
 say() { printf '  %-4s %s\n' "$1" "$2"; [[ "$1" == FAIL ]] && FAIL=1; return 0; }
 
@@ -105,6 +117,17 @@ fi
 SCENICPLUS_SKIP_CHECK=1 "$RUN" -f 7 -n >/dev/null 2>&1
 [[ $? -eq 2 ]] && say ok "-f on a step with no rule refuses instead of forcing nothing" \
                || say FAIL "-f on a step with no rule refuses instead of forcing nothing"
+
+# The other direction, which only became testable once rules existed: a step
+# number must RESOLVE to its rule. Checking only the refusal would leave the
+# lookup itself unexercised, and a `-f` that silently forces nothing is exactly
+# what the runner's rule lookup exists to prevent.
+out="$(SCENICPLUS_SKIP_CHECK=1 "$RUN" -f 1 -n 2>&1)"
+if grep -q "forcing from R01_seurat_export onward" <<<"$out"; then
+    say ok "-f 1 resolves to R01_seurat_export"
+else
+    say FAIL "-f 1 did not resolve to a rule name"
+fi
 
 SCENICPLUS_SKIP_CHECK=1 "$RUN" -n >/dev/null 2>&1
 [[ $? -eq 0 ]] && say ok "the runner's dry run succeeds" \
