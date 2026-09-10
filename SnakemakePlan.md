@@ -317,6 +317,61 @@ Two things the build settled that the plan had not:
   merged and a key missing from the second silently keeps the first one's
   value. The workspace's config is the config.
 
+### I1 is built and gated, 2026-09-09
+
+`rules/prepare.smk`, R01-R05, calling the same scripts with the same flags.
+`rule all` now targets the region sets.
+
+**The gate the plan asked for, run on the real PBMC-400 fixture.** Steps 1-3
+rebuilt from the object into the new stage layout and compared against what the
+bash driver produced in `scenicplus-pbmc400/`:
+
+| | |
+|---|---|
+| 16 export files, all 7 embeddings included | byte-identical |
+| `rna.h5ad` | byte-identical |
+| `summary.txt` | differs: the two provenance lines added earlier today |
+| `cistopic_obj.pkl` | differs by 19,533 bytes |
+
+The pickle difference is explained rather than tolerated: 19,533 = 17 bytes x
+1149 cells, and 17 is the length of `___scenicplus_run`. The driver's file has
+TAGGED cell names because it was written before the `tag_cells=False` fix. The
+workflow's file is the corrected one. Steps 4 and 5 could not run here (Ray's
+plasma socket does not work in this sandbox) and need the cluster.
+
+**The rerun triggers work, which is what the increment was for.** Changing
+`input.reduction` re-ran R01 with reason *params have changed since last
+execution*, and R02 followed as *input files updated by another job*. Nothing
+else moved.
+
+### Two things this plan got wrong, found by building it
+
+**1. Snakemake's `code` trigger does NOT cover an external script.** The plan
+says it does, and that was the second of the three reasons for the whole
+exercise. Measured: a rule whose `shell:` calls a script, then the script is
+edited, and snakemake reports *Nothing to be done*. The trigger covers the
+rule's own text, not what the rule shells out to.
+
+The fix is one line per rule: declare the script as an `input:` rather than a
+`params:`. Then the same edit reports *updated input files* and the rule
+re-runs. Every rule in `prepare.smk` does this, and `script_path()` says why.
+Had it stayed in `params`, this workflow would have reproduced the driver's
+exact blind spot -- the one that let a fixed step 3 never re-run -- while
+claiming to have removed it.
+
+**2. `:q` on an empty param renders as NOTHING, not as `''`.** So
+`--celltype_scope {params.scope:q} --reduction ...` becomes
+`--celltype_scope --reduction`, and the flag swallows the next one. R01 died
+that way on its first run, with optparse blaming `celltype_scope` for a problem
+in the value after it. `opt_arg()` omits the flag entirely instead; every option
+it is used for defaults to empty in the script, so the two are equivalent.
+
+A third, smaller: `snakemake --list` prints each rule's docstring after its
+name, so the runner's step-number lookup has to take the first field. It did
+not, and handed a whole docstring to `--forcerun`. Caught by the check that
+asserts `-f 1` RESOLVES, which exists because asserting only that `-f 7`
+refuses would have passed while the lookup was broken.
+
 ### I5 has a prerequisite nobody has bought yet: an executor plugin
 
 Measured 2026-09-09 against the environment `install_cchmc.sh` builds.

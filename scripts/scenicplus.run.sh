@@ -115,8 +115,11 @@ fi
 if [[ -n "$FROM" ]]; then
     if [[ "$FROM" =~ ^[0-9]+$ ]]; then
         want="$(printf 'R%02d_' "$FROM")"
+        # `--list` prints "R01_seurat_export (the rule's docstring...)" for any
+        # rule that has one, so take the FIRST FIELD. Without that the whole
+        # line, docstring and all, was handed to --forcerun as a rule name.
         rule="$(snakemake --snakefile "$SNAKEFILE" --list 2>/dev/null \
-                | grep -m1 "^${want}" || true)"
+                | grep -m1 "^${want}" | awk '{print $1}' || true)"
         if [[ -z "$rule" ]]; then
             echo "[scenicplus.run] ERROR: no rule named ${want}* in this workflow." >&2
             echo "  Available: $(snakemake --snakefile "$SNAKEFILE" \

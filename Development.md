@@ -184,7 +184,6 @@
     use; the runbook now says so rather than implying either is equally
     travelled.
 
-Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
 20260909: Snakemake workflow, increment I0 (`SnakemakePlan.md`)
   - Skeleton and config contract: `Snakefile`, `rules/common.smk`,
     `schemas/config.schema.yaml`, `scripts/scenicplus.run.sh`, plus
@@ -242,6 +241,36 @@ Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
     since bsub returns immediately and nothing else could have noticed that job
     die. I5 is unblocked, and what is left of it is the part none of this
     touched: what each of the twenty steps should actually ask for.
+
+20260909: Snakemake workflow, increment I1 -- steps 1-5 as rules
+  - `rules/prepare.smk`: R01-R05, calling the same scripts with the same flags.
+    `rule all` targets the region sets.
+  - **Gated against the bash driver's own outputs**, PBMC-400 fixture. All 16
+    export files byte-identical, every embedding included, and `rna.h5ad`
+    byte-identical. `summary.txt` differs by the two provenance lines added
+    earlier today. `cistopic_obj.pkl` differs by 19,533 bytes = 17 x 1149
+    cells, and 17 is the length of `___scenicplus_run`: the driver's file
+    predates the `tag_cells=False` fix, so the WORKFLOW's file is the correct
+    one. Steps 4-5 need the cluster; Ray does not run in this sandbox.
+  - Rerun triggers verified on real data: changing `input.reduction` re-ran R01
+    (*params have changed*), R02 followed (*input files updated by another
+    job*), nothing else moved.
+  - **The plan was wrong about the `code` trigger, and it mattered.** Snakemake
+    covers a rule's own text, NOT a script the rule shells out to -- measured:
+    edit the script, get "Nothing to be done". Declaring the script as an
+    `input:` closes it. Left in `params:`, this workflow would have reproduced
+    the driver's exact blind spot, the one that let a fixed step 3 never re-run,
+    while claiming to have removed it. That was one of the three reasons for
+    the whole exercise.
+  - **`:q` on an empty param renders as NOTHING, not `''`**, so
+    `--celltype_scope {params.scope:q} --reduction ...` reached optparse as
+    `--celltype_scope --reduction` and the flag swallowed the next one. R01 died
+    on its first run with optparse blaming the wrong option. `opt_arg()` omits
+    the flag instead.
+  - `snakemake --list` prints each rule's docstring after its name, so the
+    runner's step-number lookup handed a whole docstring to `--forcerun`. Found
+    by the check asserting `-f 1` RESOLVES; asserting only that `-f 7` refuses
+    would have stayed green with the lookup broken.
 
 Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
 2026-09-09; artifacts not inspected here). The PARAMETERS have never been

@@ -31,11 +31,26 @@ configfile: "config/config.yaml"
 # directory rather than the workspace's.
 validate(config, os.path.join(workflow.basedir, "schemas", "config.schema.yaml"))
 
+# The step scripts take `--config` and read the file themselves. Absolute,
+# because a cluster job's working directory is not guaranteed to be this one.
+CONFIG_FILE = os.path.abspath("config/config.yaml")
+
+# `set -o pipefail` and nothing else. Rule bodies end `2>&1 | tee {log}`, and
+# WITHOUT pipefail the exit status of that pipeline is tee's, which is 0 -- so a
+# failing script reports success and the run continues on a missing output. That
+# is 22 rules' worth of silent failure in the sibling pipeline, found only by
+# deliberately breaking one.
+#
+# Not `-e`: rule bodies chain with `&&` and would change meaning. Not `-u`: site
+# `module` functions dereference unset variables.
+shell.prefix("set -o pipefail; ")
+
 # `Pipeline: "ScenicPlus"` is also a schema constraint, so reaching here means
 # it matched. The bash driver checks the same line for the same reason: another
 # pipeline's config must not be runnable here by accident.
 
 include: "rules/common.smk"
+include: "rules/prepare.smk"
 
 SPECIES_INFO = species_info(config)
 
@@ -43,12 +58,13 @@ SPECIES_INFO = species_info(config)
 # --- Targets -----------------------------------------------------------------
 # Decision 4 of SnakemakePlan.md: `rule all` will target report.html once I6
 # lands, so that an ordinary run is not finished until the run is readable.
-# Until then it targets the analysis stage, and until I1 lands there is nothing
-# to target at all.
+# Until then it targets the furthest stage that exists, which advances one
+# increment at a time.
 #
-# An empty target list is a silent no-op, which is the failure mode this whole
-# workflow exists to remove, so onstart says it out loud instead.
-TARGETS = []
+# I1: the region sets, which is where R01-R05 end and where I3's GRN rules will
+# pick up. An empty target list is a silent no-op -- the failure mode this
+# workflow exists to remove -- so onstart still says so if it ever becomes one.
+TARGETS = [stage_path("cistopic", "region_sets")]
 
 
 rule all:
@@ -65,11 +81,11 @@ onstart:
     print(f"[scenicplus] species={species} -> {SPECIES_INFO['assembly']}, "
           f"pycistarget name {SPECIES_INFO['pycistarget']}")
     if not TARGETS:
-        print("[scenicplus] NOTHING IS TARGETED. This is the I0 skeleton: the "
-              "config contract and the\n"
-              "[scenicplus] layout exist, no step rules do. Use "
-              "scripts/scenicplus_run_pipeline.sh for a\n"
-              "[scenicplus] real run until I1 lands.")
+        print("[scenicplus] NOTHING IS TARGETED, which means a green run here "
+              "would prove nothing.")
+    else:
+        print(f"[scenicplus] steps 1-5 only (increment I1). "
+              f"Steps 6-20 still belong to scripts/scenicplus_run_pipeline.sh.")
 
 
 onsuccess:
