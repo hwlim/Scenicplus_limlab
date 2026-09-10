@@ -173,6 +173,21 @@ export SCENICPLUS_PATH=/path/to/Scenicplus_limlab
 export PATH=$SCENICPLUS_PATH/scripts:$PATH
 export PYTHONNOUSERSITE=1
 
+# Reproducibility. Without these, two runs of the same data on the same
+# cluster do not agree. Both effects are measured, not theoretical:
+#   PYTHONHASHSEED  python randomises string hashing per process, and SCENIC+
+#                   builds lists from sets of names, so the order changes every
+#                   invocation. Pandas sorts are stable, so a permuted order
+#                   permutes ties and a top-N cut then keeps different rows.
+#   *_NUM_THREADS   the maths libraries take their thread count from the host's
+#                   core count, and reduction order follows thread count. A
+#                   48-core and a 64-core node gave correlations differing in
+#                   the last bit.
+# Keep the thread number equal to resources.n_cpu, which is what the Snakemake
+# workflow pins to; the two drivers are only comparable if they agree.
+export PYTHONHASHSEED=0
+export OMP_NUM_THREADS=16 OPENBLAS_NUM_THREADS=16 MKL_NUM_THREADS=16 NUMEXPR_NUM_THREADS=16
+
 export LSF_QUEUE=normal LSF_PROJECT=scenicplus
 export LSF_CORES=16 LSF_MEM_MB=128000 LSF_WALLTIME=72:00
 scenicplus_run_lsf.sh "$@"                  # --from 7, --only 20, --force, ...

@@ -334,6 +334,52 @@
     anchor was unique first. That is the replace-first-match trap, and it cost a
     minute here rather than a cluster run.
 
+20260910: why two runs of the same data disagreed -- TWO causes, both measured
+  - Comparing a bash-driver run against a Snakemake run of the SAME data (the
+    full PBMC fixture) showed outputs matching through R11 and R13, then
+    diverging: 86 -> 74 direct eRegulons, 104 -> 96 extended.
+  - **Cause 1: BLAS thread count.** `tf_to_gene_adj.tsv` differed only in `rho`,
+    by 1e-16, on 3-9 rows of 1,428,119; `importance` and `regulation` were
+    bit-identical across four hosts, so the SEEDED gradient boosting is
+    deterministic. `rho` comes from a correlation, i.e. a matrix product, whose
+    reduction order follows thread count, which defaults to the host's core
+    count (48 vs 64 here). PROVEN both ways: two runs on the SAME host are
+    byte-identical, and pinning the thread variables made two DIFFERENT hosts
+    byte-identical.
+  - **Cause 2, and the bigger one: PYTHONHASHSEED.** Pinning threads did NOT
+    make the eGRN step host-independent. Python randomises string hashing per
+    PROCESS, and SCENIC+ does `list(set(...))` over names
+    (`utils.py:394,404,405`), so that order changes on every invocation -- same
+    host, same input. Pandas sorts are stable, so a permuted input permutes the
+    ties and a top-N cut over ties then keeps different rows. This is what the
+    cistrome comparison saw as "same entries, PERMUTED order".
+  - **A 1e-16 difference on 9 rows cannot move 12 eRegulons.** An earlier
+    reading of this blamed the floating point and was wrong; the ordering is the
+    plausible mechanism and the arithmetic is a side issue.
+  - Fix: `shell_prefix()` in `rules/common.smk` puts `PYTHONHASHSEED=0` and the
+    four `*_NUM_THREADS` variables into the GLOBAL shell prefix, so every rule
+    inherits them. Not per-rule: pinning applied to some rules and not others
+    yields a run that LOOKS reproducible and is not. Pinned to
+    `resources.n_cpu`, not the rule's `threads`, because the bash driver runs
+    every step in one job under one thread count and the two are only comparable
+    if they agree.
+  - For the bash driver, exporting the same variables in the workspace `run.sh`
+    is sufficient: one bsub job, and LSF carries the submission environment in.
+    `quickstart.md`'s runner skeleton now does it.
+  - Gated behaviourally, not by grep: `tests/dryrun.sh` includes the real
+    `common.smk`, calls the real `shell_prefix()`, and reads the environment
+    from inside a running rule -- checking the variables are present, that the
+    thread value FOLLOWS n_cpu (config says 7, env must say 7), and that two
+    interpreters agree on a string's hash. Removing the seed turns it red.
+  - **Freezing the seed buys reproducibility, not correctness.** Which
+    eRegulons survive depends on the order an unordered set happened to iterate
+    in. Report an eRegulon list with a stability caveat, and prefer several runs
+    under different seeds to see which members are always present.
+  - Still open: two eGRN runs on ONE host, which is the only comparison that
+    separates the two causes for that step. Also unexplained, and NOT ordering:
+    the cistrome motif category counts differ (363 vs 364 direct, 425 vs 423
+    extended). A permutation cannot change a count.
+
 Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
 2026-09-09; artifacts not inspected here). The PARAMETERS have never been
 examined: the topic-count sweep, the DAR thresholds and the search-space width
