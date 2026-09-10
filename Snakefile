@@ -5,11 +5,10 @@
 # default target. Rules live in rules/*.smk; helpers live in rules/common.smk.
 # If this file grows a `rule`, it is in the wrong place.
 #
-# STATUS: increment I0 of SnakemakePlan.md. The skeleton and the config
-# contract exist; no step rules yet. The bash driver
-# (scripts/scenicplus_run_pipeline.sh) remains the working entry point until
-# I8, and both read the SAME config/config.yaml, so a workspace can be driven
-# by either.
+# STATUS: increment I3 of SnakemakePlan.md. Steps 1-18 are rules; 19-20 are
+# not. The bash driver (scripts/scenicplus_run_pipeline.sh) remains the working
+# entry point until I8, and both read the SAME config/config.yaml, so one
+# workspace can be driven by either.
 #
 # Run it through scripts/scenicplus.run.sh rather than calling snakemake
 # directly: the environment preflight has to happen before a DAG is built, not
@@ -52,6 +51,7 @@ shell.prefix("set -o pipefail; ")
 include: "rules/common.smk"
 include: "rules/prepare.smk"
 include: "rules/genome.smk"
+include: "rules/grn.smk"
 
 SPECIES_INFO = species_info(config)
 
@@ -62,16 +62,13 @@ SPECIES_INFO = species_info(config)
 # Until then it targets the furthest stage that exists, which advances one
 # increment at a time.
 #
-# I1: the region sets, where R01-R05 end and I3's GRN rules will pick up.
-# I2: the checked genome pair, when the config supplies one. Conditional because
-# nothing consumes it until I3 -- rules/genome.smk explains why that is a
-# warning now and becomes a hard requirement then.
+# I3 targets the GRN result, plus the assembly record -- which nothing consumes,
+# so without naming it here the genome checks would be skipped whenever their
+# two files happened to be current.
 #
-# An empty target list is a silent no-op -- the failure mode this workflow exists
-# to remove -- so onstart still says so if it ever becomes one.
-TARGETS = [stage_path("cistopic", "region_sets")]
-if GENOME_SUPPLIED:
-    TARGETS += GENOME_FILES
+# An empty target list is a silent no-op, the failure mode this workflow exists
+# to remove, so onstart still says so if it ever becomes one.
+TARGETS = [stage_path("grn", "scplusmdata.h5mu"), stage_path("qc", "assembly.json")]
 
 
 rule all:
@@ -91,8 +88,8 @@ onstart:
         print("[scenicplus] NOTHING IS TARGETED, which means a green run here "
               "would prove nothing.")
     else:
-        print(f"[scenicplus] steps 1-5 only (increment I1). "
-              f"Steps 6-20 still belong to scripts/scenicplus_run_pipeline.sh.")
+        print("[scenicplus] steps 1-18 (increment I3). Steps 19-20 still belong "
+              "to scripts/scenicplus_run_pipeline.sh.")
 
 
 onsuccess:
