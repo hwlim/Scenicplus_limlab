@@ -1,0 +1,188 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: Scenicplus_limlab config.yaml
+
+# =============================================================================
+# Why this file exists
+#
+# Every config value is read with a plain lookup, and the bash driver hashes a
+# named SLICE of the config per step. Both treat an UNKNOWN key exactly like an
+# ABSENT one: `min_cels: 5` is discarded in silence and the shipped value is
+# used. The run then completes, every step succeeds, and nothing records that
+# the threshold you set never took effect.
+#
+# `additionalProperties: false` turns that into an error at DAG-build time,
+# naming the offending key, before a job is submitted. The type constraints
+# reject `n_cpu: x` at parse rather than inside a python step after LSF has
+# already scheduled it.
+#
+# `input.assembly` is the standing example: nothing reads it, so setting `mm10`
+# there does nothing while looking like it does something. A schema cannot fix
+# that on its own -- it is a live key with no consumer -- but it does stop the
+# NEXT one from being a typo nobody notices.
+#
+# Two rules for editing this file:
+#
+#   1. NO `default:` keys. snakemake.utils.validate() injects schema defaults
+#      into the config, creating a SECOND set of defaults able to drift from
+#      the ones the code already applies. The code's values are the ones that
+#      run; this file only says what is ALLOWED.
+#
+#   2. Derive, do not transcribe. The key list came from walking
+#      config/config.yaml programmatically, and the types from the values in
+#      it. Re-derive after adding a key rather than hand-editing both.
+#
+# ONE TEMPLATE, NOT TWO. SnakemakePlan.md's layout borrowed `Template/config.yml`
+# from scRNA_LimLab_Snake. That would give this repo two templates during the
+# transition -- one per driver -- with nothing keeping them in step. The
+# workflow instead reads the SAME `config/config.yaml` the bash driver reads, so
+# a workspace runs under either and this schema validates both.
+# =============================================================================
+
+type: object
+additionalProperties: false
+required: [Pipeline, input]
+
+properties:
+
+  # The guard that stops another pipeline's config being fed in by accident.
+  # The bash driver checks this too; here it is a hard constraint.
+  Pipeline:
+    const: "ScenicPlus"
+
+  input:
+    type: object
+    additionalProperties: false
+    required: [seurat_rds, celltype_column, species]
+    properties:
+      seurat_rds: {type: string, minLength: 1}
+      celltype_column: {type: string, minLength: 1}
+      celltype_scope:
+        type: array
+        items: {type: string}
+      # Empty is legal and means "compute a layout", which is a choice rather
+      # than a default. Whether the NAME exists cannot be checked here: only
+      # the .rds knows, so R01 checks it against Reductions(obj).
+      reduction: {type: string}
+      species:
+        type: string
+        enum: [hsapiens, mmusculus, dmelanogaster, ggallus]
+      # Live key, no consumer. Kept so an existing config still validates;
+      # SnakemakePlan.md's genome work is what gives it one.
+      assembly: {type: string}
+      # Reachable on ONE path: the step 7 download, which is skipped entirely
+      # when genome_annotation and chromsizes are supplied. Since supplying
+      # them is the normal path -- chromsizes cannot be fetched at all, and for
+      # mouse the download reports the wrong assembly -- this key only matters
+      # on a path that cannot finish. Kept because the code still reads it;
+      # SnakemakePlan.md's I2 is where it goes.
+      biomart_host: {type: string}
+      # Set BOTH or NEITHER. Empty means "have step 7 fetch them", which for
+      # chromsizes cannot succeed -- see RUNBOOK section 6.
+      genome_annotation: {type: string}
+      chromsizes: {type: string}
+      ctx_db: {type: string}
+      dem_db: {type: string}
+      motif_annotations: {type: string}
+
+  output:
+    type: object
+    additionalProperties: false
+    properties:
+      root: {type: string, minLength: 1}
+      tmp: {type: string, minLength: 1}
+
+  cistopic:
+    type: object
+    additionalProperties: false
+    properties:
+      # One LDA model per value, all fitted at once: this list sets both the
+      # wall clock (the slowest model) and the peak memory (the sum).
+      n_topics:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items: {type: integer, minimum: 2}
+      n_iter: {type: integer, minimum: 1}
+      alpha: {type: number}
+      alpha_by_topic: {type: boolean}
+      eta: {type: number}
+      eta_by_topic: {type: boolean}
+      random_state: {type: integer}
+      dar_adjpval_thr: {type: number, minimum: 0, maximum: 1}
+      dar_log2fc_thr: {type: number}
+
+  scenicplus:
+    type: object
+    additionalProperties: false
+    properties:
+      is_multiome: {type: boolean}
+      bc_transform_func: {type: string}
+      direct_annotation: {type: array, items: {type: string}}
+      extended_annotation: {type: array, items: {type: string}}
+      # Read through toks(): a whitespace-separated string or a list, because
+      # the CLI takes two values. Both spellings are accepted on purpose.
+      search_space_upstream: &two_ints
+        oneOf:
+          - {type: string, pattern: "^[0-9]+[ \t]+[0-9]+$"}
+          - {type: array, minItems: 2, maxItems: 2, items: {type: integer, minimum: 0}}
+      search_space_downstream: *two_ints
+      search_space_extend_tss: *two_ints
+      annotation_version: {type: string}
+      motif_similarity_fdr: {type: number, minimum: 0, maximum: 1}
+      orthologous_identity_threshold: {type: number, minimum: 0, maximum: 1}
+      annotations_to_use: {type: array, items: {type: string}}
+      fraction_overlap_w_dem_database: {type: number, minimum: 0, maximum: 1}
+      fraction_overlap_w_ctx_database: {type: number, minimum: 0, maximum: 1}
+      dem_max_bg_regions: {type: integer, minimum: 1}
+      dem_balance_number_of_promoters: {type: boolean}
+      dem_promoter_space: {type: integer, minimum: 0}
+      dem_adj_pval_thr: {type: number, minimum: 0, maximum: 1}
+      dem_log2fc_thr: {type: number}
+      dem_mean_fg_thr: {type: number}
+      dem_motif_hit_thr: {type: number}
+      ctx_auc_threshold: {type: number, minimum: 0, maximum: 1}
+      ctx_nes_threshold: {type: number}
+      ctx_rank_threshold: {type: number, minimum: 0, maximum: 1}
+
+  grn:
+    type: object
+    additionalProperties: false
+    properties:
+      # Left as free strings rather than enums: the accepted spellings belong
+      # to the SCENIC+ CLI, and guessing them here would reject a valid config
+      # for a constraint this repo never verified.
+      tf_to_gene_importance_method: {type: string, minLength: 1}
+      region_to_gene_importance_method: {type: string, minLength: 1}
+      region_to_gene_correlation_method: {type: string, minLength: 1}
+      order_regions_to_genes_by: {type: string, minLength: 1}
+      order_TFs_to_genes_by: {type: string, minLength: 1}
+      gsea_n_perm: {type: integer, minimum: 1}
+      # Every quantile x top-n combination is a separate region set scored
+      # downstream, so these two multiply.
+      quantile_thresholds_region_to_gene:
+        type: array
+        items: {type: number, exclusiveMinimum: 0, maximum: 1}
+      top_n_regionTogenes_per_gene:
+        type: array
+        items: {type: integer, minimum: 1}
+      top_n_regionTogenes_per_region:
+        type: array
+        items: {type: integer, minimum: 1}
+      min_regions_per_gene: {type: integer, minimum: 0}
+      rho_threshold: {type: number}
+      min_target_genes: {type: integer, minimum: 0}
+
+  resources:
+    type: object
+    additionalProperties: false
+    properties:
+      n_cpu: {type: integer, minimum: 1}
+      seed: {type: integer}
+
+  visualization:
+    type: object
+    additionalProperties: false
+    properties:
+      top_n_eRegulons_per_celltype: {type: integer, minimum: 1}
+      network_top_n_TFs: {type: integer, minimum: 1}
+      network_top_n_targets_per_TF: {type: integer, minimum: 1}

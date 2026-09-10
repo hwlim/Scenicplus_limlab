@@ -1,0 +1,102 @@
+# =============================================================================
+# A four-job workflow whose only purpose is to prove the cluster-generic
+# executor and the LSF profile work, before twenty real steps depend on them.
+#
+# It touches no data, needs no SCENIC+ environment beyond snakemake itself, and
+# writes everything under `smoke/` in whatever directory it runs in.
+#
+# What each job is for:
+#
+#   a_small   1 slot,  2 GB   -- the minimum case
+#   b_bigger  4 slots, 8 GB   -- proves threads and memory reach bsub, and that
+#                                the job actually GETS what was asked for; it
+#                                records the slots LSF gave it, not the slots
+#                                the node has
+#   c_join    depends on both -- proves a job waits for its inputs rather than
+#                                being submitted at once
+#   d_fail    exits 1         -- the case that matters most, run separately.
+#                                Without a working status command, a job that
+#                                dies is not detected: snakemake keeps waiting
+#                                for output that will never appear, and the
+#                                workflow HANGS instead of failing. That hang
+#                                is what tests/cluster_smoke.sh times out on.
+#
+# Run it through tests/cluster_smoke.sh rather than by hand.
+# =============================================================================
+
+
+rule all:
+    input:
+        "smoke/summary.txt",
+
+
+# One place, so a change cannot apply to some jobs and not others.
+def record(name):
+    return (
+        "mkdir -p smoke && {{ "
+        f'echo "rule={name}"; '
+        'echo "host=$(hostname)"; '
+        'echo "lsf_job=${{LSB_JOBID:-none}}"; '
+        'echo "lsf_queue=${{LSB_QUEUE:-none}}"; '
+        # LSB_DJOB_NUMPROC is what LSF ALLOCATED. nproc is what the node has,
+        # which on a shared cluster is a different and much larger number --
+        # the gap between the two is exactly the oversubscription this profile
+        # exists to avoid.
+        'echo "slots_allocated=${{LSB_DJOB_NUMPROC:-unset}}"; '
+        'echo "slots_on_host=$(nproc)"; '
+        'echo "threads_requested={threads}"; '
+        'echo "mem_mb_requested={resources.mem_mb}"; '
+        'date -Is; '
+        "}} > {output}"
+    )
+
+
+rule a_small:
+    output:
+        "smoke/a.txt",
+    threads: 1
+    resources:
+        mem_mb=2000,
+        runtime=10,
+    shell:
+        record("a_small")
+
+
+rule b_bigger:
+    output:
+        "smoke/b.txt",
+    threads: 4
+    resources:
+        mem_mb=8000,
+        runtime=10,
+    shell:
+        record("b_bigger")
+
+
+rule c_join:
+    input:
+        "smoke/a.txt",
+        "smoke/b.txt",
+    output:
+        "smoke/summary.txt",
+    threads: 1
+    resources:
+        mem_mb=2000,
+        runtime=10,
+    shell:
+        "cat {input} > {output} && "
+        'echo "joined_at=$(date -Is) on $(hostname)" >> {output}'
+
+
+# Not reachable from `all`: ask for smoke/fail.txt explicitly.
+rule d_fail:
+    output:
+        "smoke/fail.txt",
+    threads: 1
+    resources:
+        mem_mb=2000,
+        runtime=10,
+    shell:
+        "mkdir -p smoke && "
+        'echo "about to fail on purpose, on $(hostname)" >&2 && '
+        "exit 1"
