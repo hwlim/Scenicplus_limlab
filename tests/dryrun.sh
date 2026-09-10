@@ -93,7 +93,17 @@ edit_cfg 'c["Pipeline"] = "scRNA_LimLab_Snake"'
 run_sm && say FAIL "another pipeline's config is refused" || say ok "another pipeline's config is refused"
 restore
 
-# 6. the runner's own refusals
+# 6. half a genome pair, which is worse than none: the download that would fill
+#    the gap cannot produce chromsizes for anyone, so a config with only the
+#    annotation set looks configured and is not.
+edit_cfg 'c["input"]["genome_annotation"] = "/nonexistent/annotation.tsv"'
+if run_sm; then say FAIL "only ONE of the genome pair is refused"
+elif grep -q "BOTH or NEITHER" "$WORK/out"; then
+     say ok "only ONE of the genome pair is refused, saying both or neither"
+else say FAIL "refused, but not with the both-or-neither reason"; fi
+restore
+
+# 7. the runner's own refusals
 RUN="$SCENICPLUS_PATH/scripts/scenicplus.run.sh"
 
 # `--lsf` is environment-dependent, so assert the contract rather than one

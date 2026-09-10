@@ -272,6 +272,39 @@
     by the check asserting `-f 1` RESOLVES; asserting only that `-f 7` refuses
     would have stayed green with the lookup broken.
 
+20260909: Snakemake workflow, increment I2 -- R07 checks, it does not generate
+  - `rules/genome.smk` + `scripts/scenicplus_genome_prepare.py`. The plan's
+    generating rule is SUPERSEDED by a measurement: the SCENIC+ env has NONE of
+    the R stack `scenicplus_make_genome_files.R` needs -- both EnsDb packages,
+    both BSgenome packages, ensembldb and AnnotationFilter all absent. A
+    generating rule could not run there, and adding two genomes to a pin set
+    that took a week to settle is not this increment's trade. Generation stays
+    a tool, run once per assembly in the scRNA_LimLab_Snake env, which is also
+    the right shape: the files depend only on species and assembly, exactly
+    like the 45.7 GB of cisTarget databases nobody expects the pipeline to
+    build. Decision 1's shared reference directory needs no new config key --
+    `input.genome_annotation` / `input.chromsizes` already point into one.
+  - **Four checks, which is the part nothing ever did.** Shape (the chromsizes
+    header; the seven annotation columns get_search_space reads by name);
+    ASSEMBLY (chromosome 1's length IS the assembly, so a GRCm39 chromsizes
+    under `assembly: mm10` is refused and told it is GRCm39 -- the failure that
+    reached the 2026-05 kidney run and announced nothing); naming, across all
+    three files the search space joins INCLUDING this run's peaks; and overlap,
+    because agreeing on style is not agreeing, which is all the old diagnostic
+    could check. Copies only after all four pass.
+  - `QC/assembly.json`: species, assembly, chr1 length and what it matches,
+    naming style, chromosome and transcript counts, which peak chromosomes have
+    no annotation, sha256 of both sources. Nothing recorded any of that, which
+    is how the wrong assembly stayed invisible for four months.
+  - Consequence accepted: R07 depends on R01, because the peak chromosomes come
+    from the export. The driver's step 7 had neither the dependency nor a check.
+  - Gated on the real hg38 pair (chr1 = 248,956,422, UCSC throughout, 23/23
+    peak chromosomes annotated) plus `tests/genome_checks.sh`, which makes every
+    check fire on purpose, including that a refused pair leaves nothing behind.
+    **Two cases first "passed" because the HARNESS was wrong**: `${2:-chr}`
+    substitutes on an empty argument as well as a missing one, so the Ensembl
+    fixture came out UCSC and two refusals tested nothing. Use `${2-chr}`.
+
 Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
 2026-09-09; artifacts not inspected here). The PARAMETERS have never been
 examined: the topic-count sweep, the DAR thresholds and the search-space width
