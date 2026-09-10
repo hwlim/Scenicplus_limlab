@@ -34,21 +34,18 @@ validate(config, os.path.join(workflow.basedir, "schemas", "config.schema.yaml")
 # because a cluster job's working directory is not guaranteed to be this one.
 CONFIG_FILE = os.path.abspath("config/config.yaml")
 
-# `set -o pipefail` and nothing else. Rule bodies end `2>&1 | tee {log}`, and
-# WITHOUT pipefail the exit status of that pipeline is tee's, which is 0 -- so a
-# failing script reports success and the run continues on a missing output. That
-# is 22 rules' worth of silent failure in the sibling pipeline, found only by
-# deliberately breaking one.
-#
-# Not `-e`: rule bodies chain with `&&` and would change meaning. Not `-u`: site
-# `module` functions dereference unset variables.
-shell.prefix("set -o pipefail; ")
-
 # `Pipeline: "ScenicPlus"` is also a schema constraint, so reaching here means
 # it matched. The bash driver checks the same line for the same reason: another
 # pipeline's config must not be runnable here by accident.
 
 include: "rules/common.smk"
+
+# Included first, because the prefix is built from the config: pipefail, plus
+# the hash seed and BLAS thread pinning that make a step's output reproducible
+# across hosts. shell_prefix() in common.smk carries the measurements behind
+# each part.
+shell.prefix(shell_prefix())
+
 include: "rules/prepare.smk"
 include: "rules/genome.smk"
 include: "rules/grn.smk"

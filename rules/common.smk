@@ -58,6 +58,60 @@ def log_path(rule_name):
     return os.path.join(stage_dir("logs"), f"{rule_name}.log")
 
 
+def pin_env():
+    """The environment that makes a step's output reproducible. MEASURED.
+
+    Two independent sources of run-to-run variation, both found by comparing a
+    driver run against a workflow run of the same data:
+
+    **PYTHONHASHSEED.** Python randomises string hashing per PROCESS, and
+    SCENIC+ does `list(set(names))` in `utils.py` (lines 394, 404, 405), so that
+    list comes out in a different order every invocation -- on the same host,
+    with the same input. Pandas sorts are stable, so a permuted input permutes
+    the ties, and a top-N cut over tied values then keeps different rows. That
+    is the difference seen in the cistromes: same entries, permuted order.
+    Freezing the seed makes runs comparable; it does NOT make the ordering
+    meaningful, so an eRegulon set still deserves a stability caveat.
+
+    **The BLAS thread variables.** Reduction order follows thread count and
+    thread count defaults to the host's core count, so a 48-core and a 64-core
+    node give correlations that differ in the last bit. Measured: `rho` differed
+    by 1e-16 on 9 rows of 1,428,119, while the seeded gradient boosting was
+    bit-identical across four hosts. Pinning made two different hosts agree
+    exactly.
+
+    Pinned to `resources.n_cpu`, NOT to the rule's `threads`, on purpose. The
+    bash driver runs all twenty steps in one job under one thread count, so
+    matching that is what makes the two drivers comparable at all. The cost is
+    that a one-slot rule may run BLAS with more threads than it reserved; every
+    rule where that applies finishes in under three minutes.
+    """
+    n = n_cpu()
+    return (
+        "export PYTHONHASHSEED=0"
+        f" OMP_NUM_THREADS={n}"
+        f" OPENBLAS_NUM_THREADS={n}"
+        f" MKL_NUM_THREADS={n}"
+        f" NUMEXPR_NUM_THREADS={n}; "
+    )
+
+
+def shell_prefix():
+    """What every rule body runs before its own command.
+
+    `set -o pipefail` and nothing else from the shell side: rule bodies end
+    `2>&1 | tee {log}`, and WITHOUT pipefail that pipeline's status is tee's,
+    which is 0 -- a failing script reporting success. Not `-e`, because bodies
+    chain with `&&`; not `-u`, because site `module` functions dereference unset
+    variables.
+
+    One prefix rather than eighteen rule edits, so the pinning cannot be applied
+    to some rules and not others -- which would be worse than not applying it,
+    since the run would look reproducible and not be.
+    """
+    return "set -o pipefail; " + pin_env()
+
+
 def opt_arg(flag, value):
     """`--flag value`, or nothing at all when the value is empty.
 

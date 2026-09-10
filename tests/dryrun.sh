@@ -165,7 +165,46 @@ else
     say FAIL "the DAG's shape is wrong"; sed -n '1,5p' "$WORK/dag.txt"
 fi
 
-# 8. the runner's own refusals
+# 8. the reproducibility pinning actually reaches a job's environment.
+#
+# Behavioural, not a grep: this includes the REAL common.smk, calls the REAL
+# shell_prefix(), and reads the environment from inside a running rule. A rule
+# body that does not inherit the pins would produce a run that LOOKS
+# reproducible and is not, which is worse than not pinning at all.
+mkdir -p "$WORK/pin"
+cat > "$WORK/pin/cfg.yaml" <<'YML'
+resources:
+  n_cpu: 7
+YML
+cat > "$WORK/pin/Snakefile" <<SMK
+configfile: "cfg.yaml"
+include: "$SCENICPLUS_PATH/rules/common.smk"
+shell.prefix(shell_prefix())
+rule all:
+    output: "env.txt"
+    shell: "env | grep -E 'PYTHONHASHSEED|NUM_THREADS' | sort > {output}; "
+           "python -c \\"print(hash('ATF5'))\\" >> {output}; "
+           "python -c \\"print(hash('ATF5'))\\" >> {output}"
+SMK
+( cd "$WORK/pin" && snakemake -c1 >/dev/null 2>&1 )
+if [[ -s "$WORK/pin/env.txt" ]]; then
+    miss=""
+    for v in PYTHONHASHSEED OMP_NUM_THREADS OPENBLAS_NUM_THREADS MKL_NUM_THREADS NUMEXPR_NUM_THREADS; do
+        grep -q "^$v=" "$WORK/pin/env.txt" || miss="$miss $v"
+    done
+    # n_cpu is 7 in that config, so the thread vars must say 7 -- proving the
+    # value is derived rather than hardcoded.
+    grep -q "^OMP_NUM_THREADS=7$" "$WORK/pin/env.txt" || miss="$miss OMP!=n_cpu"
+    # Two separate interpreters must agree on a string's hash.
+    h="$(grep -c . <(sort -u <(tail -2 "$WORK/pin/env.txt")))"
+    [[ "$h" == "1" ]] || miss="$miss hash-not-stable"
+    [[ -z "$miss" ]] && say ok "every rule inherits the hash seed and BLAS thread pinning" \
+                     || say FAIL "pinning incomplete:$miss"
+else
+    say FAIL "the pinning probe did not run"
+fi
+
+# 9. the runner's own refusals
 RUN="$SCENICPLUS_PATH/scripts/scenicplus.run.sh"
 
 # `--lsf` is environment-dependent, so assert the contract rather than one
