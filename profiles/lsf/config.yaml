@@ -1,0 +1,76 @@
+# Snakemake profile for LSF, via the cluster-generic executor.
+#
+#   snakemake --profile $SCENICPLUS_PATH/profiles/lsf ...
+#
+# REQUIRES a plugin that snakemake 8 does not bundle and this environment does
+# not ship by default:
+#
+#   pip install snakemake-executor-plugin-cluster-generic==1.0.8
+#
+# The version is not free. scenicplus pins snakemake==8.5.5 AND
+# snakemake-interface-executor-plugins==8.2.0 with `==`, and 1.0.9 of this
+# plugin wants that interface at 9.0 or above, which pip can only satisfy by
+# breaking the scenicplus install. 1.0.8 is the newest that fits inside the
+# existing pins, and installing it moves no other package -- verified with
+# `pip install --dry-run`, which reported every dependency already satisfied.
+#
+# Adapted from scRNA_LimLab_Snake's profile, which has run on this cluster.
+# The two comments below are the expensive half of that file and are kept
+# deliberately: both describe failures that cost real runs there.
+
+executor: cluster-generic
+
+# `-M {resources.mem_mb}` sets the ENFORCED ceiling equal to the reservation.
+# Without it LSF treats rusage[mem] as scheduling information only and enforces
+# the queue's default MEMLIMIT instead, so a job can reserve 128 GB, use 8, and
+# still die with TERM_MEMLIMIT. This pipeline has already been killed that way
+# once, at step 4. Both flags carry the same number on purpose.
+#
+# -M is read in LSF_UNIT_FOR_LIMITS, which defaults to KB when unset; it is MB
+# at CCHMC, matching the rusage figure. Check that before trusting the number
+# at another site -- a 1024x error looks exactly like a memory bug.
+#
+# `-wa SIGTERM -wt 5` asks LSF for SIGTERM five minutes before the runlimit
+# rather than only SIGKILL at it, so a step can flush its log and exit non-zero
+# instead of vanishing.
+cluster-generic-submit-cmd: >-
+  mkdir -p logs/lsf &&
+  bsub
+  -q {resources.queue}
+  -P {resources.project}
+  -n {threads}
+  -W {resources.runtime}
+  -R "rusage[mem={resources.mem_mb}MB] span[hosts=1]"
+  -M {resources.mem_mb}
+  -J scp.{rule}.{jobid}
+  -o logs/lsf/{rule}.{jobid}.out
+  -e logs/lsf/{rule}.{jobid}.err
+  -wa SIGTERM -wt 5
+
+# WITHOUT this, snakemake cannot ask LSF anything. It submits, then waits for
+# the rule's outputs to appear -- so a job killed by LSF produces nothing,
+# notifies nothing, and the workflow waits FOREVER on a job that is already
+# gone. It is also what makes restart-times and keep-going mean anything: both
+# need a DETECTED failure.
+#
+# ABSOLUTE, through the install root. Snakemake runs this with the WORKSPACE as
+# its working directory, not the profile directory, so a relative path resolves
+# under the analysis folder and every poll fails. The plugin runs it through a
+# shell, so $SCENICPLUS_PATH is expanded at call time.
+cluster-generic-status-cmd: "$SCENICPLUS_PATH/profiles/lsf/lsf-status.sh"
+
+# Per-rule `resources:` override these. Until I5 measures the steps, they are
+# the floor rather than a recommendation: step 4's peak is the SUM over the
+# topic models fitted at once, and steps 9 and 10 read 45.7 GB of feathers.
+default-resources:
+  - "queue=normal"
+  - "project=scenicplus"
+  - "mem_mb=8000"
+  - "runtime=240"
+
+jobs: 20
+latency-wait: 60
+restart-times: 1
+rerun-incomplete: true
+keep-going: true
+printshellcmds: true

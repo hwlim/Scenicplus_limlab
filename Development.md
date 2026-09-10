@@ -185,6 +185,57 @@
     travelled.
 
 Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
+20260909: Snakemake workflow, increment I0 (`SnakemakePlan.md`)
+  - Skeleton and config contract: `Snakefile`, `rules/common.smk`,
+    `schemas/config.schema.yaml`, `scripts/scenicplus.run.sh`, plus
+    `tests/test_config_schema.py` and `tests/dryrun.sh`. No step rules, so
+    `rule all` targets nothing and SAYS SO at onstart rather than reporting a
+    silent success. The bash driver is untouched and remains the way to run
+    anything real.
+  - Both gates were made to fail before being believed. Weakening the schema in
+    two separate places turned exactly the matching case red; commenting out
+    the Snakefile's `validate()` turned the three schema-dependent checks red
+    and left the species and runner checks green.
+  - Deviation from the plan's layout, recorded there: NO `Template/config.yml`.
+    The workflow reads the same `config/config.yaml` the bash driver reads, so
+    one workspace runs under either and nothing drifts between two templates.
+  - The schema's key list was derived by walking the config, not typed out, and
+    cross-checked against what the step scripts actually read.
+  - Two things the build settled that the plan had not: the species table
+    refuses what the schema allows, because guessing an EnsDb or BSgenome name
+    for an unsupported species is inventing the one fact that fails silently;
+    and the runner passes no `--configfile`, because snakemake EXTENDS the
+    `configfile:` directive rather than replacing it, so a key missing from the
+    second file silently keeps the first one's value.
+
+20260909: the cluster executor, which I5 turns out to depend on
+  - snakemake 8 removed `--cluster` and moved submission into executor plugins;
+    this environment shipped none, so it could run the workflow locally and
+    nowhere else. The version is not ours to choose: `scenicplus 1.0a2` pins
+    `snakemake==8.5.5` AND all four interface packages with `==`, so anything
+    wanting the executor interface at 9.0+ breaks the scenicplus install rather
+    than upgrading it. That is why `snakemake` cannot be dropped from the
+    environment even though the flattening removed every call to it -- the
+    dependency is declarative, and the package still ships
+    `scenicplus/snakemake/Snakefile` for a CLI command we no longer use.
+  - Newest usable: `cluster-generic` **1.0.8** (1.0.9 wants interface >=9.0.0)
+    and `lsf` **0.2.0** (0.2.1+ want >=9.0.0; 0.3.x also want snakemake >=9).
+  - Installed cluster-generic 1.0.8 locally: `--dry-run` reported every
+    dependency satisfied and one package to add; the real install moved
+    nothing, all five pins and scenicplus unchanged, `scenicplus_check.sh`
+    still green.
+  - `profiles/lsf/` and `tests/cluster_smoke.sh` landed early, ahead of I5's
+    resource work, because a profile nobody can test is not worth writing. The
+    profile is adapted from scRNA_LimLab_Snake's, which has run on this
+    cluster, keeping its two expensive comments: `-M` beside `rusage[mem]`, and
+    why a status command is not optional.
+  - **Local mode cannot check the thing that matters.** It substitutes a shell
+    for bsub, so a failing job returns non-zero synchronously and is caught
+    without `lsf-status.sh` ever being consulted. Whether a job LSF KILLS is
+    detected -- as opposed to waited on forever -- is a cluster-only result, and
+    so is whether bsub receives the threads a rule asked for.
+
+Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
 2026-09-09; artifacts not inspected here). The PARAMETERS have never been
 examined: the topic-count sweep, the DAR thresholds and the search-space width
 are as shipped. A green run says the plumbing holds, not that the numbers mean
