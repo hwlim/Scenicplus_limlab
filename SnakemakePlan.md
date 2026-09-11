@@ -136,10 +136,10 @@ superseded.
                                onstart/onsuccess/onerror
 [x] rules/common.smk           helpers, NO rules: STAGES + stage_path(),
                                resource tiers, the species table, log_path()
-[ ] rules/prepare.smk          R01-R05                                     I1
-[ ] rules/genome.smk           R07 + the assembly record  <-- see below     I2
-[ ] rules/grn.smk              R06, R08-R18 (via scenicplus_06_grn_stage.py) I3
-[ ] rules/report.smk           R19-R20 (+ the report.html rule at I6)       I4
+[x] rules/prepare.smk          R01-R05
+[x] rules/genome.smk           R07: CHECKS a supplied pair, does not generate
+[x] rules/grn.smk              R06, R08-R18 (via scenicplus_06_grn_stage.py)
+[x] rules/report.smk           R19-R20. The report.html rule is I6.
 [x] schemas/config.schema.yaml the contract
 [-] Template/config.yml        SUPERSEDED: one template, not two. The workflow
                                reads the same config/config.yaml the bash
@@ -482,6 +482,43 @@ not, and handed a whole docstring to `--forcerun`. Caught by the check that
 asserts `-f 1` RESOLVES, which exists because asserting only that `-f 7`
 refuses would have passed while the lookup was broken.
 
+### I4 is built, 2026-09-11 -- all twenty steps are now rules
+
+`rules/report.smk`: R19 and R20. Both read only `scplusmdata.h5mu`, so they are
+independent and run together; R20 additionally reads step 01's embedding, which
+is what lets a finished run be redrawn without recomputing anything.
+
+**Which outputs are declared, and why not all of them.** The plan's rule is to
+declare everything including side effects, because a stage that exits 0 without
+its outputs is what Snakemake catches for free. Two kinds resist it. Names that
+are data-dependent cannot be declared at DAG-build time: `02_umap_eRegulon_<name>`
+is one figure per top eRegulon. And `03_rss_per_celltype` is computed inside a
+try/except that prints and continues, so a sparse cell type can legitimately
+leave it out; declaring it would turn a warning into a failed run. Everything
+else is declared, which is what makes the plotnine regression -- the two
+heatmap-dotplots that crashed on `.savefig` -- a MissingOutput failure rather
+than a run that finishes without them. Declaring those two is evidence-based:
+the validated run produced both.
+
+**`tests/output_names.py` guards the rule-versus-script name contract**, which
+nothing else does and a dry run cannot: `-n` never executes a script, so it
+cannot know what the script would have written. A declared name the script never
+writes fails at the END of a run, after every expensive stage has succeeded. The
+gate compares two independent sources, the declarations and the write calls, and
+was made to fail in both directions -- a typo'd declaration, and an
+unconditional figure left undeclared.
+
+Writing it caught me mis-reading the code: a grep suggested the extended
+dotplot was written as `04_heatmap_dotplot_extended`, and I nearly reported that
+as a defect. The number is chosen by a conditional on the following line, so
+`05_` is correct. That is the argument for the gate rather than for reading
+carefully.
+
+**Not gated here:** R19 and R20 need a real `scplusmdata.h5mu`, so the figures
+have not been rendered by this workflow. What is established is the DAG, the
+parameter slices, the commands, and that every declared name is one the scripts
+write.
+
 ### I5 has a prerequisite nobody has bought yet: an executor plugin
 
 Measured 2026-09-09 against the environment `install_cchmc.sh` builds.
@@ -686,6 +723,47 @@ bad environment would otherwise be discovered once per rule, in twenty separate
 jobs, each after its own queue wait. Keep it in `scenicplus.run.sh`, ahead of
 the snakemake invocation, and keep `SCENICPLUS_SKIP_CHECK` as the deliberate
 opt-out.
+
+---
+
+## Future work: make the result ORDER-INVARIANT, not merely reproducible
+
+Parked 2026-09-11. The pinning makes two runs agree; it does not make the answer
+independent of an arbitrary order. The difference matters because a pinned run is
+reproducible by construction while still resting on whichever order a set
+happened to iterate in.
+
+The tie-sensitive line is in the eGRN builder, and it is NOT a top-N cut:
+
+    TF2G_adj_relevant_pos.loc[TF].set_index('target')[order_TFs_to_genes_by]
+        .sort_values(ascending=False)
+
+That ranking goes to GSEA as `rnk`, and the enrichment score depends on where
+set members sit in it. `sort_values` is stable, so tied importances keep input
+order. Two candidate interventions, which are not interchangeable:
+
+1. **A total order.** Break ties by a deterministic key -- the gene or region
+   name -- wherever a sort feeds a ranking or a cut. Gives INVARIANCE: the
+   answer stops depending on input order at all, and the hash-seed pin stops
+   being load-bearing for this class. Does not change which items are best.
+2. **Include every tied member at a top-N cut**, even past N. Defensible, and
+   the idea that prompted this, but it applies only to the cuts and it changes
+   what a module CONTAINS rather than just stabilising it. A science change, to
+   be argued on its own merits.
+
+Both live in the SCENIC+ package, so either means carrying a patch or
+upstreaming one. **Measure before engineering:** gradient-boosting importances
+are continuous, so exact ties should be rare unless there is a pile at zero.
+
+    awk -F'\t' 'NR>1 {c[$3]++} END {
+      t=0; for (v in c) if (c[v] > 1) t += c[v]
+      printf "rows sharing an importance: %d of %d (%.2f%%)\n", t, NR-1, 100*t/(NR-1) }' \
+      tf_to_gene_adj.tsv
+
+Under a percent and ties were never the mechanism, which would leave the
+unexplained cistrome motif CATEGORY counts (363 vs 364 direct, 425 vs 423
+extended) as the remaining suspect -- no reordering can change a count, and
+neither intervention above would address it.
 
 ---
 
