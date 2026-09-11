@@ -50,8 +50,8 @@ rule R01_seurat_export:
         log_path("R01_seurat_export"),
     threads: 1
     resources:
-        mem_mb=mem("default", config),
-        runtime=rt("default", config),
+        mem_mb=mem("R01_seurat_export"),
+        runtime=rt("R01_seurat_export"),
     params:
         cfg=cfg_params("input.seurat_rds", "input.celltype_column",
                        "input.celltype_scope", "input.reduction"),
@@ -84,8 +84,8 @@ rule R02_build_anndata:
         log_path("R02_build_anndata"),
     threads: 1
     resources:
-        mem_mb=mem("default", config),
-        runtime=rt("default", config),
+        mem_mb=mem("R02_build_anndata"),
+        runtime=rt("R02_build_anndata"),
     params:
         cfg=cfg_params("input.celltype_column", "input.reduction"),
         in_dir=EXPORT_DIR,
@@ -124,8 +124,8 @@ rule R03_create_cistopic:
         log_path("R03_create_cistopic"),
     threads: 1
     resources:
-        mem_mb=mem("default", config),
-        runtime=rt("default", config),
+        mem_mb=mem("R03_create_cistopic"),
+        runtime=rt("R03_create_cistopic"),
     params:
         in_dir=EXPORT_DIR,
     shell:
@@ -152,8 +152,8 @@ rule R04_topic_modeling:
         log_path("R04_topic_modeling"),
     threads: n_cpu()
     resources:
-        mem_mb=mem("default", config),
-        runtime=rt("default", config),
+        mem_mb=mem("R04_topic_modeling"),
+        runtime=rt("R04_topic_modeling"),
     params:
         cfg=cfg_params("cistopic.n_topics", "cistopic.n_iter", "cistopic.alpha",
                        "cistopic.alpha_by_topic", "cistopic.eta",
@@ -187,8 +187,8 @@ rule R05_region_sets:
         log_path("R05_region_sets"),
     threads: n_cpu()
     resources:
-        mem_mb=mem("default", config),
-        runtime=rt("default", config),
+        mem_mb=mem("R05_region_sets"),
+        runtime=rt("R05_region_sets"),
     params:
         cfg=cfg_params("input.celltype_column", "cistopic.dar_adjpval_thr",
                        "cistopic.dar_log2fc_thr"),

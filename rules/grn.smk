@@ -50,13 +50,6 @@ if not GENOME_SUPPLIED:
         "section 2b has the detail.")
 
 
-def _grn_rule_common():
-    """Resources shared by every GRN rule. I5 replaces the tier with measured
-    numbers; until then all thirteen ask for the same thing, which is what the
-    single bsub'd driver job already did for all twenty."""
-    return dict(mem_mb=mem("default", config), runtime=rt("default", config))
-
-
 rule R06_prepare_gex_acc:
     """Pair the expression and accessibility sides into one MuData.
 
@@ -74,7 +67,8 @@ rule R06_prepare_gex_acc:
         log_path("R06_prepare_gex_acc")
     threads: 1
     resources:
-        **_grn_rule_common()
+        mem_mb=mem("R06_prepare_gex_acc"),
+        runtime=rt("R06_prepare_gex_acc"),
     params:
         cfg=cfg_params("scenicplus.is_multiome", "scenicplus.bc_transform_func"),
         config_file=CONFIG_FILE,
@@ -104,7 +98,8 @@ rule R08_search_space:
         log_path("R08_search_space")
     threads: 1
     resources:
-        **_grn_rule_common()
+        mem_mb=mem("R08_search_space"),
+        runtime=rt("R08_search_space"),
     params:
         cfg=cfg_params("scenicplus.search_space_upstream",
                        "scenicplus.search_space_downstream",
@@ -135,7 +130,8 @@ rule R09_cistarget:
         log_path("R09_cistarget")
     threads: n_cpu()
     resources:
-        **_grn_rule_common()
+        mem_mb=mem("R09_cistarget"),
+        runtime=rt("R09_cistarget"),
     params:
         cfg=cfg_params("input.ctx_db", "input.motif_annotations", "input.species",
                        "scenicplus.fraction_overlap_w_ctx_database",
@@ -169,7 +165,8 @@ rule R10_dem:
         log_path("R10_dem")
     threads: n_cpu()
     resources:
-        **_grn_rule_common()
+        mem_mb=mem("R10_dem"),
+        runtime=rt("R10_dem"),
     params:
         cfg=cfg_params("input.dem_db", "input.motif_annotations", "input.species",
                        "scenicplus.fraction_overlap_w_dem_database",
@@ -207,7 +204,8 @@ rule R11_prepare_menr:
         log_path("R11_prepare_menr")
     threads: 1
     resources:
-        **_grn_rule_common()
+        mem_mb=mem("R11_prepare_menr"),
+        runtime=rt("R11_prepare_menr"),
     params:
         cfg=cfg_params("scenicplus.direct_annotation",
                        "scenicplus.extended_annotation"),
@@ -235,7 +233,8 @@ rule R12_tf_to_gene:
         log_path("R12_tf_to_gene")
     threads: n_cpu()
     resources:
-        **_grn_rule_common()
+        mem_mb=mem("R12_tf_to_gene"),
+        runtime=rt("R12_tf_to_gene"),
     params:
         cfg=cfg_params("grn.tf_to_gene_importance_method", "resources.n_cpu",
                        "resources.seed", "output.tmp"),
@@ -259,7 +258,8 @@ rule R13_region_to_gene:
         log_path("R13_region_to_gene")
     threads: n_cpu()
     resources:
-        **_grn_rule_common()
+        mem_mb=mem("R13_region_to_gene"),
+        runtime=rt("R13_region_to_gene"),
     params:
         cfg=cfg_params("grn.region_to_gene_importance_method",
                        "grn.region_to_gene_correlation_method",
@@ -299,7 +299,8 @@ rule R14_egrn_direct:
         log_path("R14_egrn_direct")
     threads: n_cpu()
     resources:
-        **_grn_rule_common()
+        mem_mb=mem("R14_egrn_direct"),
+        runtime=rt("R14_egrn_direct"),
     params:
         cfg=cfg_params(*_EGRN_PARAMS),
         config_file=CONFIG_FILE,
@@ -324,7 +325,8 @@ rule R15_egrn_extended:
         log_path("R15_egrn_extended")
     threads: n_cpu()
     resources:
-        **_grn_rule_common()
+        mem_mb=mem("R15_egrn_extended"),
+        runtime=rt("R15_egrn_extended"),
     params:
         cfg=cfg_params(*_EGRN_PARAMS),
         config_file=CONFIG_FILE,
@@ -347,7 +349,8 @@ rule R16_aucell_direct:
         log_path("R16_aucell_direct")
     threads: n_cpu()
     resources:
-        **_grn_rule_common()
+        mem_mb=mem("R16_aucell_direct"),
+        runtime=rt("R16_aucell_direct"),
     params:
         cfg=cfg_params("resources.n_cpu"),
         config_file=CONFIG_FILE,
@@ -370,7 +373,8 @@ rule R17_aucell_extended:
         log_path("R17_aucell_extended")
     threads: n_cpu()
     resources:
-        **_grn_rule_common()
+        mem_mb=mem("R17_aucell_extended"),
+        runtime=rt("R17_aucell_extended"),
     params:
         cfg=cfg_params("resources.n_cpu"),
         config_file=CONFIG_FILE,
@@ -396,7 +400,8 @@ rule R18_scplus_mudata:
         log_path("R18_scplus_mudata")
     threads: 1
     resources:
-        **_grn_rule_common()
+        mem_mb=mem("R18_scplus_mudata"),
+        runtime=rt("R18_scplus_mudata"),
     params:
         config_file=CONFIG_FILE,
         scplus_out=GRN,

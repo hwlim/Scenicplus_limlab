@@ -82,8 +82,8 @@ if GENOME_SUPPLIED:
             log_path("R07_genome_annot"),
         threads: 1
         resources:
-            mem_mb=mem("default", config),
-            runtime=rt("default", config),
+            mem_mb=mem("R07_genome_annot"),
+            runtime=rt("R07_genome_annot"),
         params:
             cfg=cfg_params("input.genome_annotation", "input.chromsizes",
                            "input.species", "input.assembly"),

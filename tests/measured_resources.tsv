@@ -1,0 +1,40 @@
+# LSF accounting for one full Snakemake run of all 18 step rules, read out of
+# `logs/lsf/<rule>.<jobid>.out`. This is the evidence behind the per-rule tiers
+# in rules/common.smk, and tests/test_resources.py checks the tiers against it.
+#
+# Run: CCHMC BMICluster, 2026-09-09/10, PBMC multiome fixture (~11k cells),
+# every rule submitted with the single `default` tier of the day (128000 MB,
+# 16 slots where the rule asked for them).
+#
+# TWO CAVEATS, both load-bearing:
+#
+# 1. This run PREDATES the reproducibility pinning (it is the run whose
+#    eRegulon count came out 86 against the driver's 74). Unpinned, BLAS thread
+#    count follows the host's core count, which is why `max_threads` reaches
+#    1661. Pinned runs should need the same memory or less, so these figures are
+#    an upper bound for sizing -- but they have not been re-measured pinned.
+#
+# 2. `max_mem_mb` is LSF's figure for the whole process TREE, not one process.
+#    R09 reports 152566 MB against a 128000 MB reservation and did not die,
+#    because `-M` is enforced PER PROCESS. Read it as "this much RAM must exist
+#    on the node", which is what `rusage[mem]` reserves -- not as a per-process
+#    ceiling that was breached.
+rule	node	slots	runtime_s	max_mem_mb	max_processes	max_threads
+R01_seurat_export	bmi-460g9-19	1	172	3122	8	11
+R02_build_anndata	bmi-460g10-02	1	22	210	8	11
+R03_create_cistopic	bmi-460g9-19	1	48	8975	8	11
+R04_topic_modeling	bmi-200m5-04	16	4651	21745	31	1332
+R05_region_sets	bmi-200m5-04	16	163	34804	31	1661
+R06_prepare_gex_acc	bmi-460g9-19	1	109	8211	10	13
+R07_genome_annot	bmi-460g9-13	1	8	48	5	6
+R08_search_space	bmi-460g9-19	1	90	4096	9	12
+R09_cistarget	bmi-200m5-04	16	682	152566	28	1151
+R10_dem	bmi-200m5-03	16	409	87531	29	1152
+R11_prepare_menr	bmi-460g9-19	1	143	9239	9	12
+R12_tf_to_gene	rit-r760xa-01	16	254	7916	27	816
+R13_region_to_gene	bmi-460g9-17	16	694	10622	28	817
+R14_egrn_direct	rit-r760xa-01	16	203	37970	41	837
+R15_egrn_extended	bmi-200m5-04	16	314	41477	27	837
+R16_aucell_direct	rit-r760xa-01	16	70	11299	24	79
+R17_aucell_extended	rit-r760xa-01	16	70	11302	16	58
+R18_scplus_mudata	bmi-460g9-19	1	53	3293	9	12

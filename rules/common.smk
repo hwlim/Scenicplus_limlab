@@ -253,42 +253,117 @@ def species_info(cfg):
 
 
 # --- Resource tiers ----------------------------------------------------------
-# Memory, runtime and THREADS travel together, on purpose. Setting them apart is
-# how scRNA_LimLab_Snake ended up submitting `-n {threads}` with threads
-# defaulting to 1 while the script forked 16 workers: a 16x oversubscription
-# that no single file made visible.
+# MEASURED, 2026-09-09/10, from one full Snakemake run of all 18 step rules on
+# the PBMC multiome fixture. Every figure behind these tiers is in
+# `tests/measured_resources.tsv`, with the run's provenance and its two caveats
+# at the top of that file; `tests/test_resources.py` re-derives every assignment
+# below from it and fails if a tier stops covering its rule.
 #
-# PROVISIONAL. There is exactly one tier today, and it holds what the single
-# bsub'd driver job currently reserves for all twenty steps at once. That is not
-# a measurement of any step; it is the status quo, expressed so that rules can
-# start asking for resources by name. I5 is where per-rule tiers get real
-# numbers, from `logs/lsf/driver_*.out` and a run that records peak RSS per
-# step. Adding a tier with an invented number before then would look like
-# evidence.
-TIERS = {
-    "default": {"mem_mb": 128000, "runtime": 72 * 60, "threads": 16},
+# TWO AXES, NOT ONE, because the measurement says they do not correlate. R04
+# runs 78 minutes in 21 GB; R09 finishes in 11 minutes and wants 149 GB. Folding
+# those into one ladder forces every long rule to buy memory it never touches,
+# or every large one to buy hours. So a rule names a memory tier and a time tier
+# separately, and `tests/test_resources.py` checks each against its own figure.
+#
+# THREADS ARE NOT A TIER. They come from `n_cpu()`, which reads
+# `resources.n_cpu` -- the same number the step scripts pass to the tools that
+# fork. A tier carrying a thread count could disagree with it, and a reservation
+# that disagrees with the work is the 16x oversubscription scRNA_LimLab_Snake
+# spent a release chasing. One source, config, for both sides.
+
+# Memory ladder, MB, named for its own size in decimal GB. The names are not
+# t-shirt sizes on purpose: a rule asks for its tier BY RULE NAME (see `mem()`),
+# so these labels appear nowhere but this file, and a label that states its own
+# number cannot drift from it the way "large" can.
+MEM_TIERS = {
+    "4g":     4000,
+    "16g":   16000,
+    "32g":   32000,
+    "48g":   48000,
+    "96g":   96000,
+    "128g": 128000,
+    "192g": 192000,
+    "256g": 256000,
+}
+
+# Wall-clock ladder, MINUTES -- the unit snakemake's `runtime` resource uses and
+# the unit `-W` takes in the profile. Only two, because only one rule in the
+# whole workflow is slow: R04 at 78 minutes against a worst case of 12 elsewhere.
+# A third tier would be an invented number.
+TIME_TIERS = {
+    "quick":   60,
+    "normal": 240,
+}
+
+# The headroom each tier assignment must clear, and why it differs by rule.
+#
+#   SCALES (3x)  memory grows with cells, regions or genes, and the fixture is
+#                ~11k cells while a real cohort is several times that. Three is
+#                the factor the assignments below are checked against.
+#   FIXED (1.5x) memory is set by the cisTarget databases being read (32.8 GB
+#                of ctx feathers, 12.9 GB of dem), not by the experiment, so a
+#                bigger dataset does not move it. R09 and R10 only.
+#
+# R09 at 1.5x already asks for 256 GB. Applying the scaling factor there would
+# ask for half a terabyte to guard against growth that cannot happen.
+MEM_HEADROOM = {"scales": 3.0, "fixed": 1.5}
+
+# How each rule's memory grows, and the tiers it gets. UNMEASURED rules are
+# marked; R19 and R20 did not exist when the run above was made.
+RULE_TIERS = {
+    #                       mem      time      growth
+    "R01_seurat_export":   ("16g",  "quick",  "scales"),
+    "R02_build_anndata":   ("4g",   "quick",  "scales"),
+    "R03_create_cistopic": ("32g",  "quick",  "scales"),
+    "R04_topic_modeling":  ("96g",  "normal", "scales"),
+    "R05_region_sets":     ("128g", "quick",  "scales"),
+    "R06_prepare_gex_acc": ("32g",  "quick",  "scales"),
+    "R07_genome_annot":    ("4g",   "quick",  "scales"),
+    "R08_search_space":    ("16g",  "quick",  "scales"),
+    "R09_cistarget":       ("256g", "quick",  "fixed"),
+    "R10_dem":             ("192g", "quick",  "fixed"),
+    "R11_prepare_menr":    ("32g",  "quick",  "scales"),
+    "R12_tf_to_gene":      ("32g",  "quick",  "scales"),
+    "R13_region_to_gene":  ("32g",  "quick",  "scales"),
+    "R14_egrn_direct":     ("128g", "quick",  "scales"),
+    "R15_egrn_extended":   ("128g", "quick",  "scales"),
+    "R16_aucell_direct":   ("48g",  "quick",  "scales"),
+    "R17_aucell_extended": ("48g",  "quick",  "scales"),
+    "R18_scplus_mudata":   ("16g",  "quick",  "scales"),
+    # UNMEASURED. R19 reads `scplusmdata.h5mu` and writes TSVs, so it is R18's
+    # shape; R20 reads the same object and draws a figure per top eRegulon, so
+    # it gets a step more of each. Replace both with measurements from the first
+    # run that includes them -- test_resources.py knows they are unmeasured and
+    # says so rather than pretending to check them.
+    "R19_postprocess_tsv": ("16g",  "quick",  "scales"),
+    "R20_visualize":       ("32g",  "normal", "scales"),
 }
 
 
-def tier(name, cfg=None):
-    if name not in TIERS:
-        raise KeyError(f"unknown resource tier {name!r}. Known: {', '.join(TIERS)}")
-    t = dict(TIERS[name])
-    # resources.n_cpu is the number the STEP SCRIPTS use internally, so a rule's
-    # thread count must not exceed it or the reservation lies about the shape of
-    # the work.
-    if cfg is not None:
-        t["threads"] = min(t["threads"], cfg.get("resources", {}).get("n_cpu", t["threads"]))
-    return t
+def mem(rule_name):
+    """Memory in MB for a rule, by name. Unknown rule = hard error, not a default.
+
+    A rule that falls through to the profile's `default-resources` gets 8000 MB,
+    which is under the measured peak of twelve of the eighteen steps. Silence
+    there would read as "sized" and mean "8 GB".
+    """
+    return MEM_TIERS[_rule_tiers(rule_name)[0]]
 
 
-def mem(name, cfg=None):
-    return tier(name, cfg)["mem_mb"]
+def rt(rule_name):
+    """Wall-clock minutes for a rule, by name."""
+    return TIME_TIERS[_rule_tiers(rule_name)[1]]
 
 
-def rt(name, cfg=None):
-    return tier(name, cfg)["runtime"]
-
-
-def cpus(name, cfg=None):
-    return tier(name, cfg)["threads"]
+def _rule_tiers(rule_name):
+    if rule_name not in RULE_TIERS:
+        raise KeyError(
+            f"rule {rule_name!r} has no resource tier. Add it to RULE_TIERS in "
+            f"rules/common.smk with a measurement in tests/measured_resources.tsv, "
+            f"or tests/test_resources.py will fail. Known: {', '.join(sorted(RULE_TIERS))}"
+        )
+    m, t, _ = RULE_TIERS[rule_name]
+    for table, key in ((MEM_TIERS, m), (TIME_TIERS, t)):
+        if key not in table:
+            raise KeyError(f"rule {rule_name!r} names unknown tier {key!r}")
+    return RULE_TIERS[rule_name]

@@ -57,8 +57,8 @@ rule R19_postprocess_tsv:
         log_path("R19_postprocess_tsv")
     threads: 1
     resources:
-        mem_mb=mem("default", config),
-        runtime=rt("default", config),
+        mem_mb=mem("R19_postprocess_tsv"),
+        runtime=rt("R19_postprocess_tsv"),
     params:
         cfg=cfg_params("input.celltype_column",
                        "visualization.top_n_eRegulons_per_celltype"),
@@ -98,8 +98,8 @@ rule R20_visualize:
         log_path("R20_visualize")
     threads: 1
     resources:
-        mem_mb=mem("default", config),
-        runtime=rt("default", config),
+        mem_mb=mem("R20_visualize"),
+        runtime=rt("R20_visualize"),
     params:
         cfg=cfg_params("input.celltype_column", "input.reduction",
                        "visualization"),
