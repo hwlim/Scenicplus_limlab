@@ -59,9 +59,16 @@ cluster-generic-submit-cmd: >-
 # shell, so $SCENICPLUS_PATH is expanded at call time.
 cluster-generic-status-cmd: "$SCENICPLUS_PATH/profiles/lsf/lsf-status.sh"
 
-# Per-rule `resources:` override these. Until I5 measures the steps, they are
-# the floor rather than a recommendation: step 4's peak is the SUM over the
-# topic models fitted at once, and steps 9 and 10 read 45.7 GB of feathers.
+# `queue` and `project` are the real defaults here -- no rule sets them, and the
+# submit command above needs both.
+#
+# `mem_mb` and `runtime` are a FALLBACK THAT SHOULD NEVER FIRE. Since I5 every
+# one of the twenty rules names its own tier (`RULE_TIERS` in
+# `rules/common.smk`), and `tests/dryrun.sh` check 7b opens each resolved job to
+# confirm it. They stay because snakemake wants a default and because a missing
+# one fails obscurely -- not as a sizing opinion. 8000 MB is under the measured
+# peak of TWELVE of the eighteen measured steps, so a rule that quietly lands
+# here is a rule that will oversubscribe its node.
 default-resources:
   - "queue=normal"
   - "project=scenicplus"

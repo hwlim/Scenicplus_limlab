@@ -1,5 +1,9 @@
 .DS_Store
 
+# Python bytecode, left behind by running the step scripts or tests/.
+__pycache__/
+*.pyc
+
 # Agent-tool scratch. Under some sandboxes these are character devices, not
 # regular files, so an unfiltered `git add -A` fails on them outright.
 .claude/

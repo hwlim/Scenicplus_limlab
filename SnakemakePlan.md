@@ -146,7 +146,7 @@ superseded.
                                driver reads. See "What changed", above.
 [x] profiles/lsf/              config.yaml + lsf-status.sh, adapted from
                                scRNA_LimLab_Snake's. Early, so the executor
-                               could be tested; the RESOURCE numbers are I5.
+                               could be tested; the RESOURCE numbers landed in I5.
 [x] scripts/                   unchanged: the 8 step scripts, the helper, the
                                genome-file generator, scenicplus_check.sh
 [x] scripts/scenicplus.run.sh  the runner (-n, -j, -p, -f N, --lsf)
@@ -282,7 +282,7 @@ first: there is a trusted end-to-end result to diff against.
 | **I2** | `rules/genome.smk` + `assembly.json` + the peak/annotation cross-check | build hg38, diff against the files the working run used; build mm10, confirm chr1 = 195,471,971 |
 | **I3** | `rules/grn.smk` — steps 6, 8–18 | full run from `3.cistopic/`; `search_space.tsv` and `scplusmdata.h5mu` match |
 | **I4** | `rules/report.smk` — steps 19–20 | figures render; the RSS PNG is ~12 Mpx, not 301 |
-| **I5** | per-rule resources + LSF profile | a real cluster run; compare wall-clock and peak RSS per step against the single-job baseline |
+| **I5** | per-rule resources + LSF profile | **built 2026-09-11, local gates only.** Tiers derived from `tests/measured_resources.tsv`; `tests/test_resources.py` + `dryrun.sh` 7b. Still wants a real cluster run |
 | **I6** | `report.html`, and `rule all` switched to it | renders for a complete run; a run that fails mid-DAG still leaves usable logs + bundle |
 | **I7** | provenance bundle (config.used, git, logs, `lsf_jobs.tsv`, `assembly.json`) | bundle from a failed run contains the failing log |
 | **I8** | retire `scenicplus_run_pipeline.sh` | the runner is the only entry point; `quickstart.md` and RUNBOOK both rewritten |
@@ -628,6 +628,74 @@ treats both conservatively.
 I0–I4 are mechanical; I5 is where the payoff lands. Stopping after I4 is
 coherent (correct, still one big job); after I5 (right-sized jobs, no report);
 after I6 (a run someone can read). I7–I8 are the tidy-up.
+
+### I5 is built and gated, 2026-09-11
+
+Every one of the twenty rules now names its own memory and wall-clock tier.
+The evidence is `tests/measured_resources.tsv` — LSF accounting for all 18 step
+rules from the 2026-09-09/10 cluster run, with its provenance and caveats at the
+top of the file. `tests/test_resources.py` re-derives every assignment from it.
+
+    python3 tests/test_resources.py     # 6 checks + the table, no cluster needed
+    tests/dryrun.sh                     # now 13 checks; 7b is the new one
+
+**The single-job reservation was wrong in BOTH directions at once, and neither
+was visible.** `cistarget` peaked at 152,566 MB against the 128,000 MB the
+driver job reserved — 1.19x over — while nineteen other steps sat inside a
+reservation most of them never came close to using. Of the twenty rules, 15 now
+reserve less than the old uniform figure, 2 reserve more, and 12 ask for 32 GB
+or under, which is the difference between waiting for a large node and running
+on whatever is free.
+
+**Why the over-reservation survived unnoticed: `-M` is enforced PER PROCESS.**
+LSF's `Max Memory` is the figure for the whole process tree, so a 28-process job
+totalling 149 GB never trips a 128 GB per-process ceiling. It completed, exit 0,
+and nothing anywhere said the node had been oversubscribed. That is the same
+failure class as a silently-defaulted config key: the run succeeds and the
+number stays wrong.
+
+**Two axes, because the measurement says they do not correlate.** R04 runs 78
+minutes in 21.7 GB; R09 finishes in 11 minutes and wants 149 GB. One ladder
+would make every long rule buy memory or every large one buy hours, so a rule
+names a memory tier and a time tier separately. Only two time tiers exist (60
+and 240 minutes) because only one rule in the workflow is slow, and a third
+would be an invented number.
+
+**Headroom is 3x for rules whose memory scales with the experiment and 1.5x for
+the two whose memory is set by the cisTarget databases.** R09 and R10 read 32.8
+GB and 12.9 GB of feathers; a bigger cohort does not move that, and applying the
+scaling factor there would ask for half a terabyte to guard against growth that
+cannot happen. The policy lives in `MEM_HEADROOM` and the test enforces it, so
+lowering a tier without lowering the measurement turns the gate red.
+
+**The plan's own a-priori shape table (above) was wrong about step 4.** It
+predicted topic modeling "wants few cores, lots of RAM". It wants 21.7 GB — five
+rules want more — and it is the only slow step in the workflow, 4651 s against
+694 s for the next. Predicting which steps are heavy is exactly the thing this
+increment replaced with measurement; the table is left as written because being
+able to see it was wrong is the point.
+
+**What the reservation math does NOT say.** Reserved MB-hours fall only 20%
+(289,956 → 232,909 against 78,358 actually used). R04 holds two thirds of the
+workflow's runtime, so the integral is dominated by the one rule whose tier
+barely moved. The case for I5 is correctness and schedulability, not a big
+saving, and claiming otherwise from these numbers would not survive the
+arithmetic.
+
+**Gated locally, NOT yet run on the cluster.** Six source-level checks in
+`test_resources.py` (every rule has a tier; every rule asks for its OWN, which
+is the copy-paste defect; the table covers exactly the rules that exist; every
+tier clears the policy; unmeasured rules are named rather than skipped), plus
+`dryrun.sh` check 7b, which opens each job snakemake actually resolved and
+compares it against the table — a declaration can read correctly and still not
+take effect. Every one of them was mutation-tested: deleting a rule's
+`resources:`, pointing R15 at R14's tier, and dropping R09 one rung each turned
+exactly the intended check red.
+
+**Two things to check before the first cluster run.** R09 asks for 256,000 MB;
+confirm a node in the queue has it, or the job pends rather than fails. And R19
+and R20 carry UNMEASURED tiers — they did not exist when the run above was made,
+so replace them with real figures from the first run that includes them.
 
 ---
 

@@ -165,6 +165,72 @@ else
     say FAIL "the DAG's shape is wrong"; sed -n '1,5p' "$WORK/dag.txt"
 fi
 
+# 7b. the per-rule resources SNAKEMAKE RESOLVES, against the table they come
+#     from (I5).
+#
+# tests/test_resources.py reads the same table and the .smk files as text, which
+# proves the declarations are right and the tiers clear the measurement. It
+# cannot prove snakemake agrees: a rule whose `resources:` never took effect --
+# shadowed by a later key, lost to an indentation slip inside `if
+# GENOME_SUPPLIED:` -- still reads correctly in the file and still falls through
+# to the profile's 8000 MB on the cluster. This is the check that opens the
+# resolved job and looks.
+snakemake --snakefile "$SCENICPLUS_PATH/Snakefile" -n --cores 1 --verbose \
+    >"$WORK/verbose.txt" 2>&1
+python3 - "$WORK/verbose.txt" "$SCENICPLUS_PATH/rules/common.smk" <<'PY' >"$WORK/res.txt" 2>&1
+import re, sys
+txt = open(sys.argv[1]).read()
+# Local dry runs emit `localrule`, cluster plans `rule`; accept both.
+#
+# SPLIT INTO BLOCKS FIRST, rather than one regex spanning from a rule header to
+# the next `resources:` line. A rule that declares NO resources has no such line
+# in its block, and a spanning pattern then reaches into the NEXT job and
+# reports that job's numbers under this rule's name -- a true failure with a
+# false explanation. Measured while mutation-testing this very check.
+heads = [(m.start(), m.group(1))
+         for m in re.finditer(r"^(?:local)?rule (\w+):", txt, re.M)]
+got, nores = {}, []
+for i, (pos, name) in enumerate(heads):
+    block = txt[pos:heads[i + 1][0] if i + 1 < len(heads) else len(txt)]
+    m = re.search(r"^    resources:[^\n]*?mem_mb=(\d+)[^\n]*?runtime=(\d+)", block, re.M)
+    if m:
+        got[name] = (int(m.group(1)), int(m.group(2)))
+    elif name != "all":
+        nores.append(name)
+src, ns = open(sys.argv[2]).read(), {}
+for b in ("MEM_TIERS", "TIME_TIERS", "RULE_TIERS"):
+    blk = re.findall(rf"^{b} = \{{.*?^\}}", src, re.S | re.M)
+    if len(blk) != 1:
+        sys.exit(f"common.smk: expected one {b} block, found {len(blk)}")
+    exec(blk[0], ns)
+steps = {r: v for r, v in got.items() if r != "all"}
+bad = []
+for r in nores:
+    bad.append(f"{r}: resolved with NO mem_mb/runtime -- it would take the "
+               f"profile's default-resources on the cluster")
+if len(steps) + len(nores) != 20:
+    bad.append(f"resolved {len(steps) + len(nores)} step jobs, expected 20: "
+               f"{sorted(set(steps) | set(nores))}")
+for r, (mb, mn) in sorted(steps.items()):
+    want = ns["RULE_TIERS"].get(r)
+    if not want:
+        bad.append(f"{r}: resolved but absent from RULE_TIERS")
+        continue
+    wm, wt = ns["MEM_TIERS"][want[0]], ns["TIME_TIERS"][want[1]]
+    if (mb, mn) != (wm, wt):
+        bad.append(f"{r}: snakemake resolved {mb} MB / {mn} min, "
+                   f"table says {wm} / {wt}")
+for b in bad:
+    print(b)
+sys.exit(1 if bad else 0)
+PY
+if [[ $? -eq 0 ]]; then
+    say ok "every rule's resolved mem/runtime matches rules/common.smk"
+else
+    say FAIL "a rule's resolved resources disagree with the tier table"
+    sed -n '1,5p' "$WORK/res.txt"
+fi
+
 # 8. the reproducibility pinning actually reaches a job's environment.
 #
 # Behavioural, not a grep: this includes the REAL common.smk, calls the REAL

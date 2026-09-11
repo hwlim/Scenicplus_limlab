@@ -412,6 +412,49 @@
   - Residual under 1e-9 on the binary outputs is not zero. It is far below any
     threshold this pipeline acts on, but it is recorded rather than rounded away.
 
+20260911: Snakemake workflow, increment I5 -- per-rule resources, from measurement
+  - All twenty rules now name their own memory and wall-clock tier. The evidence
+    is `tests/measured_resources.tsv`: LSF accounting for all 18 step rules from
+    the 2026-09-09/10 run, derived out of `logs/lsf/*.out` rather than typed in.
+    `tests/test_resources.py` re-derives every assignment from it.
+  - **The single reservation was wrong in BOTH directions at once.** `cistarget`
+    peaked at 152566 MB against the 128000 MB the job reserved -- 1.19x over --
+    while nineteen other steps sat well inside it. 15 of 20 rules now reserve
+    less than that uniform figure, 2 reserve more, and 12 ask for 32 GB or under.
+  - **Why nobody noticed: `-M` is enforced PER PROCESS.** LSF's `Max Memory` is
+    the whole process tree, so a 28-process job totalling 149 GB never trips a
+    128 GB per-process ceiling. Exit 0, nothing logged, number still wrong. Same
+    failure class as a silently-defaulted config key.
+  - **Two axes, because the data says they do not correlate.** R04 runs 78
+    minutes in 21.7 GB; R09 finishes in 11 minutes and wants 149 GB. One ladder
+    makes every long rule buy memory or every large one buy hours. Only two time
+    tiers exist, because only one rule is slow and a third would be invented.
+  - **Headroom 3x where memory scales with the experiment, 1.5x for R09 and R10**,
+    whose memory is set by the 32.8 GB + 12.9 GB of cisTarget feathers they read
+    and does not move with cohort size. At 3x, R09 would ask for half a terabyte
+    to guard against growth that cannot happen.
+  - **The plan's own prediction about step 4 was wrong**, and the table is left
+    standing so that stays visible: it forecast "wants few cores, lots of RAM",
+    and topic modeling wants 21.7 GB -- five rules want more -- while being the
+    only slow step in the workflow.
+  - **The arithmetic does not support a savings claim.** Reserved MB-hours fall
+    only 20% (289956 -> 232909, against 78358 used) because R04 holds two thirds
+    of the runtime and its tier barely moved. The case is correctness and
+    schedulability. Saying otherwise would not survive the numbers.
+  - Gated locally and NOT yet run on a cluster: six source checks plus a new
+    `dryrun.sh` 7b that opens each job snakemake actually RESOLVED -- a
+    declaration can read correctly and still not take effect. All four
+    mutation-tested (delete a rule's `resources:`; point R15 at R14's tier; drop
+    R09 one rung; each turned exactly the intended check red).
+  - **Two things to settle before the first cluster run.** R09 asks for 256000
+    MB -- confirm a node in the queue has it, or it pends instead of failing.
+    And R19/R20 carry UNMEASURED tiers: they did not exist when the run above was
+    made, so they are sized by analogy to R18 and must be replaced with figures.
+  - One check found its own bug while being mutation-tested: the first 7b regex
+    spanned from a rule header to the NEXT job's `resources:` line, so a rule
+    with none reported its neighbour's numbers under its own name -- a true
+    failure with a false explanation. Split into blocks first.
+
 Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
 2026-09-09; artifacts not inspected here). The PARAMETERS have never been
 examined: the topic-count sweep, the DAR thresholds and the search-space width
