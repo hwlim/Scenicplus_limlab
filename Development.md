@@ -384,6 +384,16 @@
   - Both drivers re-run on the same data WITH the pinning
     (`PYTHONHASHSEED=0` + the `*_NUM_THREADS` set). Result: every text output
     matches by md5, remaining numeric differences under 1e-9.
+  - **Figures closed the same day**, the last artifact class outstanding: the
+    PNGs match by md5 AND were opened and read side by side. The hash says the
+    same data was drawn; the reading says it is the same picture, not the same
+    bytes by coincidence.
+  - **The PDFs do NOT match, and that is not a defect.** Each figure is written
+    twice (`scenicplus_08_visualize.py:53-62`) and matplotlib stamps
+    `/CreationDate` into a PDF, so two runs differ in those bytes with identical
+    content. Measured on matplotlib 3.6.3: same code, two runs, PNG md5
+    identical, PDF md5 different, `/CreationDate` present. `pin_env()` does not
+    address it because a timestamp is not variation in the DATA. Compare PNGs.
   - So the 86 -> 74 eRegulon gap was never the scheduling layer. It was the
     environment, and of the two causes the ORDERING one mattered more than the
     arithmetic: `list(set(...))` over names (`utils.py:394,404,405`) reordered
