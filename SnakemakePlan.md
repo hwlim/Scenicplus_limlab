@@ -139,7 +139,7 @@ superseded.
 [x] rules/prepare.smk          R01-R05
 [x] rules/genome.smk           R07: CHECKS a supplied pair, does not generate
 [x] rules/grn.smk              R06, R08-R18 (via scenicplus_06_grn_stage.py)
-[x] rules/report.smk           R19-R20. The report.html rule is I6.
+[x] rules/report.smk           R19-R20, and R21_report (I6).
 [x] schemas/config.schema.yaml the contract
 [-] Template/config.yml        SUPERSEDED: one template, not two. The workflow
                                reads the same config/config.yaml the bash
@@ -283,7 +283,7 @@ first: there is a trusted end-to-end result to diff against.
 | **I3** | `rules/grn.smk` — steps 6, 8–18 | full run from `3.cistopic/`; `search_space.tsv` and `scplusmdata.h5mu` match |
 | **I4** | `rules/report.smk` — steps 19–20 | figures render; the RSS PNG is ~12 Mpx, not 301 |
 | **I5** | per-rule resources + LSF profile | **built 2026-09-11, local gates only.** Tiers derived from `tests/measured_resources.tsv`; `tests/test_resources.py` + `dryrun.sh` 7b. Still wants a real cluster run |
-| **I6** | `report.html`, and `rule all` switched to it | renders for a complete run; a run that fails mid-DAG still leaves usable logs + bundle |
+| **I6** | `report.html`, and `rule all` switched to it | **built 2026-09-11, local gates only.** `tests/report_render.sh` renders a partial workspace and asserts what the page says is MISSING; still wants a cluster run |
 | **I7** | provenance bundle (config.used, git, logs, `lsf_jobs.tsv`, `assembly.json`) | bundle from a failed run contains the failing log |
 | **I8** | retire `scenicplus_run_pipeline.sh` | the runner is the only entry point; `quickstart.md` and RUNBOOK both rewritten |
 
@@ -693,9 +693,95 @@ take effect. Every one of them was mutation-tested: deleting a rule's
 exactly the intended check red.
 
 **Two things to check before the first cluster run.** R09 asks for 256,000 MB;
-confirm a node in the queue has it, or the job pends rather than fails. And R19
-and R20 carry UNMEASURED tiers — they did not exist when the run above was made,
-so replace them with real figures from the first run that includes them.
+confirm a node in the queue has it, or the job pends rather than fails. And
+`R21_report` carries an UNMEASURED tier — it did not exist when the accounting
+above was taken.
+
+**R19 and R20 were measured on 2026-09-11 and one guess was wrong.** They were
+sized by analogy to R18 here. R19's held (3978 MB, 4.0x of `16g`); R20's was two
+memory rungs and a whole time tier too generous, reserving 240 minutes for a
+rule that runs in 95 seconds. Retiered `32g`/`normal` → `16g`/`quick`. The wrong
+guess was the one that felt better justified — R20 draws figures, and figures
+sound expensive.
+
+**THAT RUN DID NOT VALIDATE THESE TIERS, despite finishing cleanly.** Its
+epilogues report `Total Requested Memory: 128000.00 MB` for both rules, which is
+the pre-I5 uniform tier verbatim; under I5 they ask for 16,000 and 32,000. It
+was launched from a clone without I5. The measurements are unaffected — what a
+rule USES is independent of what it reserved — but I5 stays *built, not
+validated*. Worth generalising: "the run was clean" and "the run exercised the
+change" are different claims, and the reservation an epilogue reports is the
+evidence for the second.
+
+### I6 is built and gated, 2026-09-11
+
+`report.html` — one self-contained page saying what the run did and what it
+found — plus `rule all` switched to it, so an ordinary run is not finished until
+the run is READABLE. That was Decision 4 all along; it lands here because a
+report of a run that took one oversized job says less than a report of one that
+was scheduled properly.
+
+    tests/report_render.sh       # 24 checks, renders a PARTIAL workspace
+    tests/dryrun.sh              # 14 checks now; -f 21 resolves to R21_report
+
+**R21 is a rule, not a step.** The bash driver has no equivalent, so the count
+is 20 steps plus one. The number stays the interface: `-f 21` forces a redraw,
+which is the single most likely thing anyone wants to force.
+
+**Standard library only, and that is a decision rather than a constraint.**
+jinja2 IS available (snakemake requires `jinja2 <4.0,>=3.0`) and pandas is a
+scenicplus dependency. The reason to use neither is the failure mode a template
+introduces: the sibling repo's report drivers pass params into an `.Rmd`, and an
+undeclared param is a HARD RENDER FAILURE invisible to every dry run, discovered
+at the end of a cluster run after every expensive rule has already succeeded. A
+function that returns a string cannot fail that way.
+
+**Self-contained, within a budget.** PNGs embed as base64 data URIs so the page
+survives being copied off the cluster, which is what makes it the thing people
+actually open. But one figure here is 12 megapixels, and an unbudgeted embed
+produces a page no browser will load — the same class of failure as the
+301-megapixel figure this increment exists to surface. Over
+`report.max_embed_mb` (default 4) a figure is LINKED and the page says which and
+why. Both directions are asserted.
+
+**A MISSING SECTION IS REPORTED, NEVER SKIPPED**, and that is the half the gate
+aims at. A report of a complete run is easy; the dangerous one is the page that
+quietly omits the section whose data never arrived, because it looks finished.
+So the fixture is deliberately partial — two of four tables absent, one figure
+family missing, an empty log, an assembly MISMATCH — and the assertions are
+about what the page says is wrong.
+
+**Two defects found by writing the gate, both mine.** The LSF field regex was
+anchored with `^` but compiled without `re.M`, so every accounting number read 0
+while the unanchored host regex kept working — a compute table of zeroes beside
+correct node names. And the gate's own missing-table assertion PASSED while the
+report skipped the table, because the section's summary row still carried the
+filename; tightened to require the missing-block that only the per-table branch
+emits. Three mutations now: strip `re.M`, defeat the embed budget, skip a
+missing table. All three turn it red.
+
+**An assumption in an existing test was falsified by this increment.**
+`dryrun.sh` asserted `-f 21` refuses, with a comment claiming 21 "stays out of
+range however far the increments get". It does not. The out-of-range number is
+now DERIVED from `--list`, so it cannot go stale again — and `-f 21` has its own
+positive case.
+
+**What the report does NOT depend on, deliberately.** `logs/` and `logs/lsf/`
+are read opportunistically, never declared: they are written by the jobs this
+rule waits for, and a rule's own log does not exist while it runs. Declaring
+them would be a dependency on files whose final content postdates the
+dependency. `QC/assembly.json` is likewise read rather than declared, because
+R07 is already upstream of R19/R20 and the edge would change nothing.
+
+**Accepted consequence, restated because it will look like a bug.** Snakemake
+does not build a target whose inputs failed, so a partial run leaves NO report.
+`onerror` now says so out loud, since the report's absence after a failure
+otherwise reads as a second problem rather than the expected consequence of the
+first. The logs are what a partial run leaves behind, and the provenance bundle
+at I7.
+
+**Not run on a cluster.** `report.html` has never been produced from a real
+`5.analysis/`; every check above is against a synthetic workspace.
 
 ---
 

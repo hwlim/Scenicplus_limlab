@@ -330,13 +330,21 @@ RULE_TIERS = {
     "R16_aucell_direct":   ("48g",  "quick",  "scales"),
     "R17_aucell_extended": ("48g",  "quick",  "scales"),
     "R18_scplus_mudata":   ("16g",  "quick",  "scales"),
-    # UNMEASURED. R19 reads `scplusmdata.h5mu` and writes TSVs, so it is R18's
-    # shape; R20 reads the same object and draws a figure per top eRegulon, so
-    # it gets a step more of each. Replace both with measurements from the first
-    # run that includes them -- test_resources.py knows they are unmeasured and
-    # says so rather than pretending to check them.
+    # MEASURED 2026-09-11, the first run that included them. Both were guessed
+    # by analogy to R18 in I5; the guess held for R19 (3978 MB, 4.0x of 16g) and
+    # was two rungs and a whole time tier too generous for R20, which reserved
+    # 240 minutes for a 95-second rule. Retiered to what the data says.
+    #
+    # They are close enough to each other to share tiers for a real reason: both
+    # read the same `scplusmdata.h5mu` and neither holds much beyond it -- R20's
+    # figures are drawn and freed one at a time.
     "R19_postprocess_tsv": ("16g",  "quick",  "scales"),
-    "R20_visualize":       ("32g",  "normal", "scales"),
+    "R20_visualize":       ("16g",  "quick",  "scales"),
+    # R21 reads TSVs with csv.reader and base64s a handful of PNGs. It
+    # holds one figure at a time, so its peak follows the LARGEST FIGURE
+    # rather than the dataset -- and the largest here is ~12 Mpx. 4g is
+    # generous for that and does not scale with cells.
+    "R21_report":          ("4g",   "quick",  "fixed"),
 }
 
 

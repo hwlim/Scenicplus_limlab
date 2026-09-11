@@ -55,20 +55,27 @@ SPECIES_INFO = species_info(config)
 
 
 # --- Targets -----------------------------------------------------------------
-# Decision 4 of SnakemakePlan.md: `rule all` will target report.html once I6
-# lands, so that an ordinary run is not finished until the run is readable.
-# Until then it targets the furthest stage that exists, which advances one
-# increment at a time.
+# Decision 4 of SnakemakePlan.md, LANDED AT I6: `rule all` targets report.html,
+# so an ordinary run is not finished until the run is READABLE. That makes
+# looking at the output non-optional by construction rather than by discipline
+# -- the failure it prevents is a green run whose outputs nobody opened, which
+# this pipeline has already produced once (the 301-megapixel RSS figure was
+# "successful" for a day).
 #
-# I4 targets the analysis stage, which is Decision 4's stated interim: report.html
-# becomes the default target at I6, not before, or every increment up to it fails
-# its own target. The assembly record is named too -- nothing consumes it, so
-# without it the genome checks would be skipped whenever their two files happened
-# to be current.
+# R19's and R20's outputs are still named even though R21 depends on both. That
+# is not redundancy: `rules.R21_report.output` alone would let a future edit to
+# R21's inputs silently narrow what a default run builds, and the analysis stage
+# is the product -- the report is how it is read. Naming both means the target
+# list states the intent rather than inheriting it.
+#
+# The assembly record is named for a different reason: nothing consumes it, so
+# without it here the genome checks would be skipped whenever their two files
+# happened to be current.
 #
 # An empty target list is a silent no-op, the failure mode this workflow exists
 # to remove, so onstart still says so if it ever becomes one.
-TARGETS = (rules.R19_postprocess_tsv.output
+TARGETS = (rules.R21_report.output
+           + rules.R19_postprocess_tsv.output
            + rules.R20_visualize.output
            + [stage_path("qc", "assembly.json")])
 
@@ -90,15 +97,25 @@ onstart:
         print("[scenicplus] NOTHING IS TARGETED, which means a green run here "
               "would prove nothing.")
     else:
-        print("[scenicplus] all 20 steps (increment I4). report.html arrives "
-              "with I6; until then the analysis stage is the target.")
+        print("[scenicplus] all 20 steps + report.html (increment I6).")
 
 
 onsuccess:
-    print(f"[scenicplus] done. Logs in {stage_dir('logs')}/")
+    # Name the report, not the directory. The whole point of I6 is that the run
+    # is not finished until someone can read it, and a path they have to
+    # assemble themselves is one they do not open.
+    print(f"[scenicplus] done. Open {os.path.abspath('report.html')}")
+    print(f"[scenicplus] logs in {stage_dir('logs')}/")
 
 
 onerror:
     print(f"[scenicplus] FAILED. The failing rule's own output is in "
           f"{stage_dir('logs')}/<rule>.log,")
     print("[scenicplus] which is more specific than the snakemake log above it.")
+    # Said out loud because the report is now the default target, and its
+    # absence after a failure looks like a second problem rather than the
+    # expected consequence of the first. Snakemake will not build a target whose
+    # inputs failed; the logs are what a partial run leaves behind (and, at I7,
+    # the provenance bundle).
+    print("[scenicplus] NO report.html: snakemake does not build a target "
+          "whose inputs failed. The logs above are the record of this run.")

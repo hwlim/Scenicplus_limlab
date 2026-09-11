@@ -88,7 +88,7 @@ for smk in sorted(os.listdir(os.path.join(ROOT, "rules"))):
     for i, (pos, name) in enumerate(starts):
         end = starts[i + 1][0] if i + 1 < len(starts) else len(text)
         rules[name] = {"file": smk, "body": text[pos:end]}
-ok(f"found the step rules ({len(rules)})", len(rules) == 20,
+ok(f"found the rules ({len(rules)})", len(rules) == 21,
    f"got {len(rules)}: {', '.join(sorted(rules))}")
 
 # --- 1. every rule declares memory AND runtime -------------------------------

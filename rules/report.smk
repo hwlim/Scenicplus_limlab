@@ -115,3 +115,71 @@ rule R20_visualize:
         " --embedding_dir {params.embedding_dir:q}"
         " {params.reduction}"
         " 2>&1 | tee {log}"
+
+
+# =============================================================================
+# R21: report.html -- the run, made readable.
+#
+# NOT one of the twenty steps. The bash driver has no equivalent, which is the
+# point: a finished run used to leave ~20 loose PNGs and 4 TSVs with nothing
+# saying which mattered or whether the run was healthy. `rule all` targets this
+# file (SnakemakePlan.md Decision 4), so an ordinary run is not done until the
+# run is readable -- non-optional by construction rather than by discipline.
+#
+# WHAT IT DEPENDS ON, AND WHAT IT DELIBERATELY DOES NOT.
+#
+# Declared inputs are R19's four tables and R20's figures, so the report cannot
+# be built from a stale analysis stage and re-runs when either does.
+#
+# NOT declared: `logs/`, `logs/lsf/` and `QC/assembly.json`. Two different
+# reasons, and neither is an oversight.
+#
+#   * The LOGS ARE WRITTEN BY THE JOBS THIS RULE WAITS FOR, and a rule's own log
+#     does not exist while it runs. Declaring them would be a dependency on
+#     files whose final content postdates the dependency -- the same shape as
+#     the sibling repo's "an artifact written DURING a run cannot describe that
+#     run completely". The report reads whatever is on disk when it runs and
+#     says what is missing.
+#   * `assembly.json` IS a real product of R07, but R07 is upstream of R19/R20
+#     already, so depending on it adds an edge that changes nothing. It is read
+#     opportunistically and reported as absent when it is not there -- which is
+#     the honest outcome for a workspace whose genome pair was supplied without
+#     the checks having run.
+#
+# THE REPORT IS THE DEFAULT TARGET, NOT THE ONLY ARTIFACT. Snakemake will not
+# build it if an upstream rule failed, so a partial run leaves no report -- an
+# accepted consequence recorded in the plan. The per-rule logs and (at I7) the
+# provenance bundle are what a failed run leaves behind.
+# =============================================================================
+rule R21_report:
+    """One self-contained HTML page: run, genome, tables, figures, compute."""
+    input:
+        tables=rules.R19_postprocess_tsv.output,
+        figures=rules.R20_visualize.output,
+        script=script_path("scenicplus_09_report.py"),
+    output:
+        html="report.html",
+    log:
+        log_path("R21_report")
+    threads: 1
+    resources:
+        mem_mb=mem("R21_report"),
+        runtime=rt("R21_report"),
+    params:
+        # Every value the page prints comes from files it reads at run time, so
+        # there is no config key here whose change should rebuild it. The two
+        # that shape the PAGE rather than its content are params on purpose:
+        # editing either re-renders, which is cheap and correct.
+        config_file=CONFIG_FILE,
+        pipeline=workflow.basedir,
+        head_rows=config.get("report", {}).get("head_rows", 15),
+        max_embed_mb=config.get("report", {}).get("max_embed_mb", 4.0),
+    shell:
+        "python {input.script}"
+        " --workspace ."
+        " --config {params.config_file:q}"
+        " --pipeline {params.pipeline:q}"
+        " --out {output.html:q}"
+        " --head-rows {params.head_rows}"
+        " --max-embed-mb {params.max_embed_mb}"
+        " 2>&1 | tee {log}"

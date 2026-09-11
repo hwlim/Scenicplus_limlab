@@ -134,7 +134,10 @@ for a, b in re.findall(r'(\d+) -> (\d+)', t):          # a -> b : b needs a
     deps.setdefault(label.get(b, b), set()).add(label.get(a, a))
 rules = {r for r in label.values() if r.startswith("R")}
 checks = [
-    ("all 20 step rules are in the graph", len(rules) == 20, sorted(rules)),
+    # 20 steps + R21_report, which is not a step: the bash driver has no
+    # equivalent and `rule all` targets it (I6).
+    ("all 20 step rules plus R21_report are in the graph",
+     len(rules) == 21 and "R21_report" in rules, sorted(rules)),
     # The non-obvious edge: tf_to_gene reads tf_names.txt, which prepare_menr
     # writes. The driver satisfied this by being sequential, not by declaring it.
     ("R12 needs R11, for tf_names.txt",
@@ -160,7 +163,7 @@ for n, d in bad:
 sys.exit(1 if bad else 0)
 PY
 if [[ $? -eq 0 ]]; then
-    say ok "the DAG has the right shape: 20 rules, and the four pairs stay parallel"
+    say ok "the DAG has the right shape: 21 rules, and the four pairs stay parallel"
 else
     say FAIL "the DAG's shape is wrong"; sed -n '1,5p' "$WORK/dag.txt"
 fi
@@ -208,8 +211,8 @@ bad = []
 for r in nores:
     bad.append(f"{r}: resolved with NO mem_mb/runtime -- it would take the "
                f"profile's default-resources on the cluster")
-if len(steps) + len(nores) != 20:
-    bad.append(f"resolved {len(steps) + len(nores)} step jobs, expected 20: "
+if len(steps) + len(nores) != 21:
+    bad.append(f"resolved {len(steps) + len(nores)} step jobs, expected 21: "
                f"{sorted(set(steps) | set(nores))}")
 for r, (mb, mn) in sorted(steps.items()):
     want = ns["RULE_TIERS"].get(r)
@@ -291,13 +294,28 @@ else
     fi
 fi
 
-# All twenty steps have rules now, so this points past the end. A `-f` that
-# silently forces NOTHING is what the lookup exists to prevent, so the check
-# needs a number that genuinely has no rule -- 21 stays out of range however far
-# the increments get.
-SCENICPLUS_SKIP_CHECK=1 "$RUN" -f 21 -n >/dev/null 2>&1
-[[ $? -eq 2 ]] && say ok "-f 21, which has no rule at all, refuses instead of forcing nothing" \
-               || say FAIL "-f 21 did not refuse, though no R21_ rule exists"
+# A `-f` that silently forces NOTHING is what the lookup exists to prevent, so
+# this needs a number with genuinely no rule behind it.
+#
+# DERIVED, NOT HARDCODED. This check used to pass a literal 21, with a comment
+# claiming 21 "stays out of range however far the increments get". I6 added
+# R21_report and falsified it, turning a real check into a failure about its own
+# assumption. Ask --list what exists and take the first gap after it, so the
+# number cannot go stale again.
+_MAXN="$(snakemake --snakefile "$SCENICPLUS_PATH/Snakefile" --list 2>/dev/null \
+         | sed -n 's/^R\([0-9][0-9]\)_.*/\1/p' | sort -n | tail -1)"
+_OOR=$(( 10#${_MAXN:-0} + 1 ))
+SCENICPLUS_SKIP_CHECK=1 "$RUN" -f "$_OOR" -n >/dev/null 2>&1
+[[ $? -eq 2 ]] && say ok "-f $_OOR, which has no rule at all, refuses instead of forcing nothing" \
+               || say FAIL "-f $_OOR did not refuse, though no R$(printf '%02d' $_OOR)_ rule exists"
+
+# The report rule is numbered like the steps, so the number is the interface for
+# it too -- and "redraw the report" is the single most likely thing anyone wants
+# to force. Checked explicitly, because it is the boundary the case above moved.
+out="$(SCENICPLUS_SKIP_CHECK=1 "$RUN" -f 21 -n 2>&1)"
+grep -q "forcing from R21_report onward" <<<"$out" \
+  && say ok "-f 21 resolves to R21_report, so the report can be redrawn by number" \
+  || { say FAIL "-f 21 did not resolve to R21_report"; sed -n '1,4p' <<<"$out"; }
 
 # The other direction, which only became testable once rules existed: a step
 # number must RESOLVE to its rule. Checking only the refusal would leave the
