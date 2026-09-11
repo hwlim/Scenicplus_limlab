@@ -428,7 +428,8 @@ input turns exactly that check red.
 
 **I3 IS VALIDATED ON THE CLUSTER, 2026-09-11.** Both drivers were run on the
 same data with the reproducibility pinning in place, and they agree: every text
-output matches by md5, and the remaining numeric differences are under 1e-9.
+output matches by md5, every figure PNG matches by md5, and the remaining
+numeric differences are under 1e-9.
 
 That closes the question the whole comparison existed to answer. The eRegulon
 gap of 86 against 74 was never the scheduling layer. It was the environment:
@@ -450,6 +451,25 @@ Three things that are now established rather than argued:
 Residual under 1e-9 on the binary outputs, with the text outputs byte-identical.
 Not zero, so it is worth knowing it exists; far below anything a threshold in
 this pipeline acts on.
+
+**The figures agree too, and that was the last artifact class left.** Confirmed
+2026-09-11: the PNGs from the two drivers match by md5, and they were also
+opened and read side by side. Byte-identical raster output is the stronger half
+-- it means the same data was drawn, not that two pictures look alike -- and the
+reading is what establishes the biology is the same picture rather than the same
+bytes by accident. With this the comparison covers everything the run emits:
+text by md5, numeric under 1e-9, figures by md5 and by eye.
+
+**Do NOT compare the PDFs, and do not read a difference there as a defect.**
+Every figure is written twice, `.pdf` and `.png` (`scenicplus_08_visualize.py`
+lines 53-62). Matplotlib stamps `/CreationDate` into a PDF, so two runs at
+different times differ in those bytes with identical content -- measured here on
+matplotlib 3.6.3: same code, two runs, PNG md5 identical, PDF md5 different, and
+`/CreationDate` present in the file. Nothing in `pin_env()` addresses it, because
+a timestamp is not a source of variation in the DATA. Someone hashing the PDFs
+in a year will find a mismatch and conclude the drivers disagree; they do not.
+`SOURCE_DATE_EPOCH` would freeze it if the whole artifact set ever needs to be
+hash-comparable in one pass.
 
 **The genome pair is now mandatory**, a parse-time refusal rather than I2's
 warning, because R08 cannot build a search space without it.
