@@ -19,6 +19,17 @@
 #    because `-M` is enforced PER PROCESS. Read it as "this much RAM must exist
 #    on the node", which is what `rusage[mem]` reserves -- not as a per-process
 #    ceiling that was breached.
+#
+# 3. THE LAST TWO ROWS COME FROM A DIFFERENT RUN -- the 2026-09-11 rerun, which
+#    is the first to include R19 and R20. Their `node` and `slots` are recorded
+#    as `unknown` because the operator supplied the resource block without the
+#    host line; nothing reads those two columns, and inventing a node name would
+#    put a fact in this file that nobody measured.
+#
+#    That rerun requested 128000 MB for both, which is the PRE-I5 uniform tier
+#    -- so it did NOT exercise the per-rule tiers. What a rule USED is
+#    independent of what it reserved, so these figures size the tiers correctly
+#    regardless; they just do not validate them.
 rule	node	slots	runtime_s	max_mem_mb	max_processes	max_threads
 R01_seurat_export	bmi-460g9-19	1	172	3122	8	11
 R02_build_anndata	bmi-460g10-02	1	22	210	8	11
@@ -38,3 +49,5 @@ R15_egrn_extended	bmi-200m5-04	16	314	41477	27	837
 R16_aucell_direct	rit-r760xa-01	16	70	11299	24	79
 R17_aucell_extended	rit-r760xa-01	16	70	11302	16	58
 R18_scplus_mudata	bmi-460g9-19	1	53	3293	9	12
+R19_postprocess_tsv	unknown	unknown	46	3978	8	57
+R20_visualize	unknown	unknown	95	4132	8	57

@@ -186,3 +186,19 @@ properties:
       top_n_eRegulons_per_celltype: {type: integer, minimum: 1}
       network_top_n_TFs: {type: integer, minimum: 1}
       network_top_n_targets_per_TF: {type: integer, minimum: 1}
+
+  # report.html (R21). Both keys shape the PAGE, not the science -- nothing here
+  # changes a number the pipeline computes, which is why the report rule can
+  # take them as params and re-render cheaply.
+  report:
+    type: object
+    additionalProperties: false
+    properties:
+      # Rows shown per eRegulon table. The full table is the TSV beside the
+      # report; this is only what the page renders inline.
+      head_rows: {type: integer, minimum: 1}
+      # A PNG at or under this size is embedded as a data URI, which is what
+      # lets the report be copied off the cluster and still work. Above it the
+      # figure is LINKED and the page says so -- one figure here is ~12 Mpx,
+      # and an unbudgeted embed produces a page no browser will open.
+      max_embed_mb: {type: number, minimum: 0}

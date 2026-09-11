@@ -455,6 +455,71 @@
     with none reported its neighbour's numbers under its own name -- a true
     failure with a false explanation. Split into blocks first.
 
+20260911: Snakemake workflow, increment I6 -- report.html, and rule all targets it
+  - One self-contained HTML page per run: run + genome + eRegulon tables +
+    figures + LSF accounting + logs + the config as read. `rule all` targets it,
+    so an ordinary run is not finished until the run is READABLE. That closes
+    the failure this pipeline already had once -- a green run whose 301-megapixel
+    RSS figure nobody could open, unnoticed for a day.
+  - **R21_report is a rule, not a step.** 20 steps plus one; the bash driver has
+    no equivalent. `-f 21` forces a redraw, which is what anyone actually wants
+    to force.
+  - **Standard library only**, and deliberately so rather than by necessity:
+    jinja2 is guaranteed (snakemake requires it) and pandas is a scenicplus
+    dep. The reason to use neither is the sibling repo's lesson -- an undeclared
+    `.Rmd` param is a hard render failure no dry run catches, surfacing at the
+    END of a cluster run. A function returning a string cannot fail that way.
+  - **Figures embed as data URIs under a budget, and LINK above it**, saying
+    which and why. One figure here is 12 Mpx; an unbudgeted embed makes a page
+    no browser opens, which is the same failure class it exists to surface.
+  - **The gate aims at the MISSING half.** `tests/report_render.sh` renders a
+    deliberately PARTIAL workspace -- two of four tables absent, a figure family
+    missing, an empty log, an assembly MISMATCH -- and asserts what the page
+    says is wrong. A report that silently omits the section whose data never
+    arrived looks finished and is not.
+  - **Two defects found by writing the gate, both mine.** The LSF field regex
+    was anchored `^` but compiled WITHOUT `re.M`, so every accounting number
+    read 0 while the unanchored host regex kept working: a compute table of
+    zeroes beside correct node names. And the gate's own missing-table assertion
+    passed while the report skipped the table, because the summary row still
+    carried the filename -- a check that could not report the problem it was
+    written for. Both fixed, three mutations now turn the gate red.
+  - **An existing test's assumption was falsified.** `dryrun.sh` asserted `-f 21`
+    refuses, commenting that 21 "stays out of range however far the increments
+    get". I6 added R21. The out-of-range number is now DERIVED from `--list`.
+  - Accepted and now said out loud in `onerror`: snakemake does not build a
+    target whose inputs failed, so a partial run leaves NO report. Its absence
+    after a failure would otherwise read as a second problem.
+  - **Not cluster-run.** No report has been produced from a real `5.analysis/`.
+
+20260911: the rerun finished cleanly -- and it did NOT validate I5
+  - Reported by the operator as a clean run, and I recorded it as I5's cluster
+    validation. **That was wrong, and the epilogues say so.** R19 and R20 both
+    report `Total Requested Memory: 128000.00 MB`, which is the PRE-I5 uniform
+    tier verbatim; under I5 they request 16000 and 32000. So this run was
+    launched from a clone that did not have I5. The per-rule tiers remain
+    BUILT, NOT VALIDATED, and RUNBOOK's status row is corrected to say so.
+  - Worth keeping as a shape: "the run was clean" and "the run exercised the
+    change" are different claims, and only the second one needs evidence FROM
+    INSIDE the run. The reservation an epilogue reports is that evidence, and
+    it is the first thing to read after any resource change.
+  - **It DID supply the two measurements I5 shipped without**, and those are
+    valid regardless: what a rule uses is independent of what it reserved. R19
+    3978 MB / 46 s, R20 4132 MB / 95 s. Both now in
+    `tests/measured_resources.tsv`, so `test_resources.py` checks them instead
+    of naming them unmeasured.
+  - **One guess held, one did not.** R19's analogy to R18 was right (4.0x of
+    16g). R20's was two memory rungs and a whole time tier too generous -- it
+    reserved 240 minutes for a rule that runs in 95 seconds. Retiered
+    32g/normal -> 16g/quick. That is the argument for measuring rather than
+    reasoning about shape: the wrong guess was the one that FELT better
+    justified, because R20 draws figures and figures sound expensive.
+  - Node and slots are recorded as `unknown` for both: the operator supplied the
+    resource block without the host line. Nothing reads those columns, and
+    inventing a node name would put an unmeasured fact in a file whose whole
+    purpose is measurement.
+  - R21_report still needs the same treatment after the first run including it.
+
 Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
 2026-09-09; artifacts not inspected here). The PARAMETERS have never been
 examined: the topic-count sweep, the DAR thresholds and the search-space width
