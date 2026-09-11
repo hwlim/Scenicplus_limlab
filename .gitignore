@@ -1,1 +1,6 @@
 .DS_Store
+
+# Agent-tool scratch. Under some sandboxes these are character devices, not
+# regular files, so an unfiltered `git add -A` fails on them outright.
+.claude/
+.mcp.json
