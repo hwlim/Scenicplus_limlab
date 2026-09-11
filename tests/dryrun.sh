@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
-# Gate for the Snakemake workflow (I0-I3): does it parse, and does it refuse what it
+# Gate for the Snakemake workflow (I0-I4): does it parse, and does it refuse what it
 # is supposed to refuse.
 #
 #   tests/dryrun.sh
 #
 # Needs snakemake on PATH and SCENICPLUS_PATH set to the repository root. Builds
 # a throwaway workspace from the shipped config template, so it touches nothing
-# real and needs no data: at I0 there are no step rules, so nothing reads the
-# .rds the config points at.
+# real and needs no data: every check is a dry run or a refusal, so no rule ever
+# opens the files the config points at.
 #
 # Every case here is a negative one except the first. That is deliberate: a
 # workflow that parses proves only that it is not broken, while a workflow that
@@ -134,7 +134,7 @@ for a, b in re.findall(r'(\d+) -> (\d+)', t):          # a -> b : b needs a
     deps.setdefault(label.get(b, b), set()).add(label.get(a, a))
 rules = {r for r in label.values() if r.startswith("R")}
 checks = [
-    ("all 18 step rules are in the graph", len(rules) == 18, sorted(rules)),
+    ("all 20 step rules are in the graph", len(rules) == 20, sorted(rules)),
     # The non-obvious edge: tf_to_gene reads tf_names.txt, which prepare_menr
     # writes. The driver satisfied this by being sequential, not by declaring it.
     ("R12 needs R11, for tf_names.txt",
@@ -160,7 +160,7 @@ for n, d in bad:
 sys.exit(1 if bad else 0)
 PY
 if [[ $? -eq 0 ]]; then
-    say ok "the DAG has the right shape: 18 rules, and the four pairs stay parallel"
+    say ok "the DAG has the right shape: 20 rules, and the four pairs stay parallel"
 else
     say FAIL "the DAG's shape is wrong"; sed -n '1,5p' "$WORK/dag.txt"
 fi
@@ -225,12 +225,13 @@ else
     fi
 fi
 
-# Step 20 has no rule until I4. Update this number as increments land: a `-f`
-# that silently forces nothing is what the lookup exists to prevent, so the
-# check has to point at a step that genuinely has no rule.
-SCENICPLUS_SKIP_CHECK=1 "$RUN" -f 20 -n >/dev/null 2>&1
-[[ $? -eq 2 ]] && say ok "-f 20, which has no rule yet, refuses instead of forcing nothing" \
-               || say FAIL "-f 20 did not refuse, though no R20_ rule exists"
+# All twenty steps have rules now, so this points past the end. A `-f` that
+# silently forces NOTHING is what the lookup exists to prevent, so the check
+# needs a number that genuinely has no rule -- 21 stays out of range however far
+# the increments get.
+SCENICPLUS_SKIP_CHECK=1 "$RUN" -f 21 -n >/dev/null 2>&1
+[[ $? -eq 2 ]] && say ok "-f 21, which has no rule at all, refuses instead of forcing nothing" \
+               || say FAIL "-f 21 did not refuse, though no R21_ rule exists"
 
 # The other direction, which only became testable once rules existed: a step
 # number must RESOLVE to its rule. Checking only the refusal would leave the

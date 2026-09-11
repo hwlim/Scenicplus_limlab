@@ -5,10 +5,10 @@
 # default target. Rules live in rules/*.smk; helpers live in rules/common.smk.
 # If this file grows a `rule`, it is in the wrong place.
 #
-# STATUS: increment I3 of SnakemakePlan.md. Steps 1-18 are rules; 19-20 are
-# not. The bash driver (scripts/scenicplus_run_pipeline.sh) remains the working
-# entry point until I8, and both read the SAME config/config.yaml, so one
-# workspace can be driven by either.
+# STATUS: increment I4 of SnakemakePlan.md. All 20 steps are rules. The bash
+# driver (scripts/scenicplus_run_pipeline.sh) remains a working entry point
+# until I8, and both read the SAME config/config.yaml, so one workspace can be
+# driven by either -- which is how they were compared.
 #
 # Run it through scripts/scenicplus.run.sh rather than calling snakemake
 # directly: the environment preflight has to happen before a DAG is built, not
@@ -49,6 +49,7 @@ shell.prefix(shell_prefix())
 include: "rules/prepare.smk"
 include: "rules/genome.smk"
 include: "rules/grn.smk"
+include: "rules/report.smk"
 
 SPECIES_INFO = species_info(config)
 
@@ -59,13 +60,17 @@ SPECIES_INFO = species_info(config)
 # Until then it targets the furthest stage that exists, which advances one
 # increment at a time.
 #
-# I3 targets the GRN result, plus the assembly record -- which nothing consumes,
-# so without naming it here the genome checks would be skipped whenever their
-# two files happened to be current.
+# I4 targets the analysis stage, which is Decision 4's stated interim: report.html
+# becomes the default target at I6, not before, or every increment up to it fails
+# its own target. The assembly record is named too -- nothing consumes it, so
+# without it the genome checks would be skipped whenever their two files happened
+# to be current.
 #
 # An empty target list is a silent no-op, the failure mode this workflow exists
 # to remove, so onstart still says so if it ever becomes one.
-TARGETS = [stage_path("grn", "scplusmdata.h5mu"), stage_path("qc", "assembly.json")]
+TARGETS = (rules.R19_postprocess_tsv.output
+           + rules.R20_visualize.output
+           + [stage_path("qc", "assembly.json")])
 
 
 rule all:
@@ -85,8 +90,8 @@ onstart:
         print("[scenicplus] NOTHING IS TARGETED, which means a green run here "
               "would prove nothing.")
     else:
-        print("[scenicplus] steps 1-18 (increment I3). Steps 19-20 still belong "
-              "to scripts/scenicplus_run_pipeline.sh.")
+        print("[scenicplus] all 20 steps (increment I4). report.html arrives "
+              "with I6; until then the analysis stage is the target.")
 
 
 onsuccess:
