@@ -380,6 +380,28 @@
     the cistrome motif category counts differ (363 vs 364 direct, 425 vs 423
     extended). A permutation cannot change a count.
 
+20260911: the two drivers agree -- the comparison is closed
+  - Both drivers re-run on the same data WITH the pinning
+    (`PYTHONHASHSEED=0` + the `*_NUM_THREADS` set). Result: every text output
+    matches by md5, remaining numeric differences under 1e-9.
+  - So the 86 -> 74 eRegulon gap was never the scheduling layer. It was the
+    environment, and of the two causes the ORDERING one mattered more than the
+    arithmetic: `list(set(...))` over names (`utils.py:394,404,405`) reordered
+    per process, stable pandas sorts turned that into different tie-breaks, and
+    a top-N cut kept different rows. The 1e-16 `rho` difference that started the
+    investigation was the smaller half.
+  - **I3 is validated on the cluster.** Eighteen rules across seven hosts
+    reproduce one bsub'd job walking twenty steps in a line. That also confirms
+    the DAG, including the edge the driver never declared (R12 needs R11's
+    `tf_names.txt`) -- a wrong dependency would have shown as a different
+    answer, not merely a different order.
+  - Worth keeping: reproducibility was the PRECONDITION for this comparison, not
+    a nicety. Without the pinning there was no way to tell a scheduling defect
+    from environment noise, and the first attempt to explain the gap blamed the
+    arithmetic and was wrong.
+  - Residual under 1e-9 on the binary outputs is not zero. It is far below any
+    threshold this pipeline acts on, but it is recorded rather than rounded away.
+
 Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
 2026-09-09; artifacts not inspected here). The PARAMETERS have never been
 examined: the topic-count sweep, the DAR thresholds and the search-space width
