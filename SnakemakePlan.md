@@ -426,10 +426,30 @@ properties rather than as a snapshot, because a snapshot breaks on every
 legitimate change and teaches people to re-bless it. Removing R12's `tf_names`
 input turns exactly that check red.
 
-**What cannot be gated here.** R09 and R10 read the 45.7 GB cisTarget
-databases, so I3's real test is a cluster run and nothing on this workstation
-substitutes for it. What IS established: the DAG, the parameter slices, and that
-every rule's command is the driver's.
+**I3 IS VALIDATED ON THE CLUSTER, 2026-09-11.** Both drivers were run on the
+same data with the reproducibility pinning in place, and they agree: every text
+output matches by md5, and the remaining numeric differences are under 1e-9.
+
+That closes the question the whole comparison existed to answer. The eRegulon
+gap of 86 against 74 was never the scheduling layer. It was the environment:
+`PYTHONHASHSEED` randomising the order of `list(set(...))` over names, and BLAS
+thread count following the host's core count. Fix both and eighteen rules across
+seven hosts reproduce one bsub'd job running twenty steps in a line.
+
+Three things that are now established rather than argued:
+
+- **The flattened stage scripts are driver-agnostic.** The same commands, given
+  the same environment, give the same answers whoever schedules them.
+- **The DAG is right**, including the edge the driver never declared (R12 needs
+  R11's `tf_names.txt`). A wrong dependency would have shown up as a different
+  answer, not just a different order.
+- **Reproducibility was the precondition, not a nicety.** Without the pinning
+  this comparison could not have been made at all, and the 1e-16 arithmetic
+  difference that started the investigation turned out to be the smaller half.
+
+Residual under 1e-9 on the binary outputs, with the text outputs byte-identical.
+Not zero, so it is worth knowing it exists; far below anything a threshold in
+this pipeline acts on.
 
 **The genome pair is now mandatory**, a parse-time refusal rather than I2's
 warning, because R08 cannot build a search space without it.
