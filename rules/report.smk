@@ -182,4 +182,10 @@ rule R21_report:
         " --out {output.html:q}"
         " --head-rows {params.head_rows}"
         " --max-embed-mb {params.max_embed_mb}"
+        # {log} is this rule's own log. It exists from the moment the job
+        # starts (tee creates it) and is still EMPTY when the script reads
+        # logs/, because this script's output is printed afterwards.
+        # Naming it lets the page annotate that row instead of raising a
+        # false empty-log alarm on every single run.
+        " --self-log {log}"
         " 2>&1 | tee {log}"

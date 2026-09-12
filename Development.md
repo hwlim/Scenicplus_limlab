@@ -492,6 +492,30 @@
     after a failure would otherwise read as a second problem.
   - **Not cluster-run.** No report has been produced from a real `5.analysis/`.
 
+20260911: the first real report found one defect -- its own log read as empty
+  - Operator ran the report and it flagged `R21_report.log` as an empty log.
+    The file has content afterwards; it is empty WHILE the page is built,
+    because the rule pipes through `tee` and this script prints only after it
+    has read `logs/`. So the alarm fires on every single run, and a check that
+    cries wolf every time is one people learn to skip.
+  - Fixed by NAMING it rather than guessing: the rule passes `{log}` as
+    `--self-log`. That row is labelled "written after this page", excluded from
+    the alarm, and the page explains the mechanism. Guessing the filename from
+    the rule name would make the report depend on a convention it cannot see,
+    and being wrong there means either the false alarm forever or a real empty
+    log silently suppressed.
+  - **Separated, not suppressed**, and the gate asserts BOTH directions --
+    either alone is satisfiable the wrong way. Three mutations turn it red:
+    ignore `--self-log`; suppress every empty log; keep the row note but drop
+    the explanation. The middle one is the over-correction, and it is the one
+    worth having a test for.
+  - Third time this shape has cost something: the sibling repo once reported a
+    report's own missing log as evidence the run had been local. "An artifact
+    written DURING a run cannot describe that run completely" is now a check
+    here rather than a note.
+  - Worth saying plainly: a synthetic fixture would not have produced this. It
+    took someone opening a real report.
+
 20260911: the rerun finished cleanly -- and it did NOT validate I5
   - Reported by the operator as a clean run, and I recorded it as I5's cluster
     validation. **That was wrong, and the epilogues say so.** R19 and R20 both
