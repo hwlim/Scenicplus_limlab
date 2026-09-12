@@ -1093,6 +1093,45 @@ report for something interactive.
 
 ---
 
+### I8 is HELD, pending one cluster run, 2026-09-12
+
+I8 retires the bash driver. Held on purpose, because **nothing built since I3
+has completed a cluster run on the current code**: I5's tiers are explicitly not
+cluster-validated (the run that looked like validation turned out to be pre-I5
+code), I7's bundle has never come from a real GRN run, and the three Fig 2
+figures are local-only. Deleting the driver now removes the fallback before the
+replacement is proven on the machine it has to work on.
+
+The plan calls I7-I8 tidy-up, which is fair. Tidy-up assumes the thing being
+tidied around already works.
+
+**BEFORE the run — one thing that can make it pend rather than fail.**
+`R09_cistarget` reserves 256,000 MB and `R10_dem` 192,000 MB. Confirm a node in
+the queue actually has that much, or the job waits forever with no error. This
+is the single unchecked assumption in I5.
+
+**Expect these to re-run even on an existing workspace**, and neither is a bug:
+
+- `R04_topic_modeling` gained a declared output (the model-selection figure), so
+  it re-runs — the 78-minute step, and the one whose reservation matters most.
+- `R20_visualize` now tracks `resources.seed`, so its params changed once.
+
+**WHAT ONE RUN SETTLES**, which is the reason to do it before anything else:
+
+| open item | what to look at |
+|---|---|
+| I5's per-rule tiers | any TERM_MEMLIMIT, any pending job; and `Total Requested Memory` in an epilogue must NOT read 128000 — that is how the last run was caught as pre-I5 |
+| `R21_report`'s tier | the last unmeasured one; its LSF numbers go into `tests/measured_resources.tsv` |
+| I6's report | the first from a real `5.analysis/`; everything so far is synthetic |
+| I7's bundle | the first from a real run. The real proof is the next FAILURE producing a bundle that explains itself |
+| the three new figures | open them. Every defect in them so far was found by looking, not by testing |
+| `QC/topic_model_selection.png` | does the sweep have a clear optimum, or did four metrics disagree? |
+
+Only after that does I8 become what the plan says it is: a deletion and two
+document rewrites.
+
+---
+
 ## Traps to carry across, not rediscover
 
 Each of these cost a real run in one repo or the other:
