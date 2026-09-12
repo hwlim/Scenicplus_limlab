@@ -955,6 +955,13 @@
     that shows `--lsf` names the wrapper. Three controls -- the warning removed
     from RUNBOOK, `-W` deleted, the template repointed at the old driver -- each
     turning it red.
+  - **THE PATTERN IS TESTED; the file is the tidied copy.** The example came
+    from the script the operator has been running on CCHMC, not from a design.
+    The first commit of this hedged -- "not exercised on LSF ... the first real
+    submission is the test that matters" -- which was wrong, and wrong in the
+    direction that matters: it invited the next reader to distrust a path that
+    already works. What is genuinely untested is only the generalisation, the
+    RUN_ARGS array and the EDIT ME block. Recorded in RUNBOOK section 7.
 
 Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
 2026-09-09; artifacts not inspected here). The PARAMETERS have never been
