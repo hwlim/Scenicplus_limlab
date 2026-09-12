@@ -1151,6 +1151,26 @@ Both fixed: the fixture now uses `scRNA_counts:cell_type`, and a new check reads
 red. Its regex needed a lookbehind to skip the function DEFINITION, whose own
 parameter is `ct_col` — without it the check reported the signature as a caller.
 
+#### The report had NO run scoping, found by a forcerun
+
+`--forcerun R20` surfaced two symptoms with one cause: the report listed every
+log the workspace had ever had, and `R21_report` appeared in Compute carrying
+the PREVIOUS run's numbers.
+
+The report globbed `logs/` with no scoping at all, while the provenance bundle
+scoped by `logs/.run_started`. **The scoping was built into one and not the
+other**, so a forcerun produced a correctly scoped bundle beside a report
+describing the whole previous run. The R21 row is the same cause: `bsub -o`
+APPENDS, so its epilogue from the earlier run was still on disk and the parser
+read it as current — a stale row that looks live, which is strictly worse than
+the absence it replaced.
+
+Both sections now scope to the marker, from ONE predicate that
+`scenicplus_provenance.py` imports rather than copies, so the two cannot drift
+apart again. The report also STATES its scope — how many older logs it left out,
+or, with no marker, that the scope is unknown and these are all-time logs, which
+is exactly what a workspace last run before the marker existed looks like.
+
 #### The report cannot contain its own job, in two places now
 
 `R21_report` appeared under **Logs** and not under **Compute**, which reads as a
