@@ -1151,6 +1151,30 @@ Both fixed: the fixture now uses `scRNA_counts:cell_type`, and a new check reads
 red. Its regex needed a lookbehind to skip the function DEFINITION, whose own
 parameter is `ct_col` — without it the check reported the signature as a caller.
 
+#### A consumer and its fixture written together test neither
+
+Three instances in one week, and the third made the pattern unmistakable.
+
+1. The **t-SNE** read the config's cell-type column while MuData prefixes obs
+   with the modality. My fixture used the bare name — a shape that does not
+   occur — so the function was exercised against fiction.
+2. **`output_names.py`** saw only stems passed literally to `save()`, so a name
+   reaching it through a variable was invisible. It caught one of two new
+   figures and looked green about the other.
+3. The report's **Genome section** read `assembly_detected` /
+   `assembly_configured`, which R07 has never written. Both rows rendered `?`
+   on a real report, and the mismatch panel beneath them could never fire —
+   unreachable code presenting itself as a safeguard, on the GRCm39 trap that
+   already cost a run. My fixture invented the same two keys.
+
+Each time the consumer and its test were written from the same imagination, so
+they agreed with each other and with nothing the producer emits. **Anchor one
+side on the producer.** `tests/record_keys.py` now does that for the assembly
+record, comparing the report's `rec.get(...)` calls against R07's own
+`record = {...}` literal; `output_names.py` does it for figure names. The
+remaining unanchored consumer of a produced shape is worth finding before it
+finds us.
+
 #### The report had NO run scoping, found by a forcerun
 
 `--forcerun R20` surfaced two symptoms with one cause: the report listed every

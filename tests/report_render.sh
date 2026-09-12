@@ -106,8 +106,17 @@ png(os.path.join(out, "topic_model_selection_mimno_2011_maximize.png"), 12, 8)
 PY
 open "$WS/QC/topic_model_selection.pdf" 2>/dev/null || printf '%%PDF-1.4\n%%%%EOF\n' > "$WS/QC/topic_model_selection.pdf"
 
+# THE REAL RECORD SHAPE, copied from scenicplus_genome_prepare.py's own
+# `record = {...}`. The first version of this fixture invented
+# `assembly_detected` / `assembly_configured` -- the same names the report
+# invented -- so fixture and consumer agreed with each other and with nothing
+# the producer writes. Both rows rendered "?" on a real report and the mismatch
+# panel could never fire. A fixture written from the same imagination as the
+# code it checks is not a check.
 cat > "$WS/QC/assembly.json" <<'JSN'
-{"assembly_detected": "hg38", "assembly_configured": "hg19",
+{"generated": "2026-09-12T16:00:00+00:00", "species": "hsapiens",
+ "assembly": "hg38", "chr1_bp": 248956422, "chr1_matches": "hg38",
+ "chromosome_naming": "UCSC",
  "n_chromosomes": 24, "n_annotation_rows": 1200,
  "n_annotation_chromosomes": 24, "peak_chromosomes": 25,
  "peak_chromosomes_annotated": 24, "peak_chromosomes_unannotated": ["chrM"],
@@ -256,9 +265,11 @@ qc_imgs="$(grep -o '<img src="[^"]*" alt="topic_model_selection[^"]*"' "$OUT" | 
 has "...and the per-metric panels are POINTED AT"  "panel(s) alongside this one"
 has "...naming the QC folder they are in"          "QC/"
 has "...and the all-panels PDF"                    "topic_model_selection_all_pages.pdf"
-has "an assembly mismatch is raised loudly"       "Assembly mismatch"
-has "...naming both sides"                        "hg19"
+has "the assembly is reported as CONFIRMED"       "Assembly confirmed"
+has "...with the measurement behind it"           "248,956,422 bp"
+has "...and the chromosome naming, the Ensembl/UCSC trap" "UCSC"
 has "unannotated peak chromosomes are named"      "chrM"
+hasnt "no '?' rows survive in the genome section" ">?<"
 
 # --- 4. the embed budget, in BOTH directions ---------------------------------
 has "a small PNG is embedded as a data URI"       "data:image/png;base64,"

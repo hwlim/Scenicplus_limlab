@@ -771,6 +771,34 @@
     run, contradicting my own fixture. The stale epilogue is now a dedicated
     rule, independent of the R21 case, so one fix cannot appear to satisfy both.
 
+20260912: the report's Genome section read keys R07 never writes
+  - Reported from the real report: "configured" and "detected" assembly both
+    showed `?`. The section read `assembly_detected` / `assembly_configured`;
+    R07 writes `assembly`, `chr1_bp` and `chr1_matches`. I wrote the consumer
+    from memory instead of from the producer.
+  - **The worse half: the "Assembly mismatch" panel could NEVER FIRE.** It
+    compared two keys that are always absent -- unreachable code presenting
+    itself as a safeguard, on exactly the trap (GRCm39 against mm10) that
+    already cost this project a run.
+  - **Nothing caught it because MY FIXTURE INVENTED THE SAME KEYS.** Consumer
+    and test were written from one imagination, so they agreed with each other
+    and with nothing the producer emits. Third instance this week: the t-SNE
+    read an unprefixed MuData column, `output_names.py` saw only literal figure
+    stems, now this. The lesson, written into tests/record_keys.py: WHEN A
+    CONSUMER AND ITS FIXTURE ARE WRITTEN TOGETHER THEY TEST NEITHER -- anchor
+    one of them on the producer.
+  - The panel is deleted rather than fixed: R07 calls `die()` on a length
+    mismatch, so a mismatched run never reaches the report. In its place the
+    section states which situation the reader is in -- confirmed, with the
+    measurement; or **NOT confirmed because `input.assembly` is unset**, which
+    is the one case genuinely worth warning about and the open door to GRCm39.
+  - Two things now shown that never were: chromosome 1's measured length, and
+    `chromosome_naming` -- the Ensembl/UCSC split that cost a run.
+  - `tests/record_keys.py` compares the report's `rec.get(...)` keys against
+    R07's own `record = {...}` literal. Reverting one key turns it red and
+    prints both sets. It also lists keys written and not shown, so dropping
+    something useful stays a decision.
+
 Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
 2026-09-09; artifacts not inspected here). The PARAMETERS have never been
 examined: the topic-count sweep, the DAR thresholds and the search-space width
