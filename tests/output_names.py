@@ -88,9 +88,15 @@ for stem in sorted(declared):
 #   09_/10_  region overlap needs at least TWO eRegulons with regions to
 #         compare; a run with one, or with no region metadata, legitimately
 #         produces neither. Same argument as 03_.
+#   11_/12_  the eRegulon-activity t-SNE needs an AUC modality, at least ten
+#         cells and the cell-type column present; a focused `celltype_scope`
+#         can leave too few, and the embedding is skipped rather than drawn
+#         from nothing.
 EXPECTED_UNDECLARED = {"03_rss_per_celltype",
                        "09_region_overlap_direct",
-                       "10_region_overlap_extended"}
+                       "10_region_overlap_extended",
+                       "11_tsne_eRegulon_gene_based",
+                       "12_tsne_eRegulon_region_based"}
 undeclared = literal - {s.split("{")[0] for s in declared} - declared
 surprise = undeclared - EXPECTED_UNDECLARED
 say(not surprise,

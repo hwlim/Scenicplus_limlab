@@ -678,6 +678,33 @@
     proved counted by tightening the schema until it went red.
   - `overlap_top_n` is `minimum: 2`: a pairwise overlap needs two things.
 
+20260912: candidate 1 -- cells in eRegulon activity space (t-SNE)
+  - `11_tsne_eRegulon_gene_based` / `12_tsne_eRegulon_region_based`, coloured by
+    the Seurat cell type. The ONLY report figure on its own layout, and the
+    caption says so -- every other uses the Seurat reduction, and a reader who
+    has scrolled past six of those will assume the seventh shares them.
+  - **Seeded from `resources.seed`, and R20 now TRACKS that key.** The only
+    stochastic figure in the pipeline. Unseeded it would undo the
+    reproducibility the pinning work established; untracked, changing the seed
+    would leave the figure untouched with nothing to do -- the silent no-op the
+    sibling repo just spent an increment removing, re-created in a new rule.
+  - Perplexity clamped: sklearn requires it below the sample count and errors
+    otherwise, and `celltype_scope` can leave few cells.
+  - **Clusters labelled IN PLACE.** Fine at 12 types, but tab20 repeats after 20
+    and the sibling repo hit this at 27, where the legend became the lookup it
+    exists to save. A name at each cluster's median reads without colours.
+  - Gate's centre is a SEED PAIR: same seed byte-identical, different seed
+    different. Either alone is satisfiable the wrong way. The embedding itself
+    is sklearn's and is not tested.
+  - `output_names.py` caught both figures immediately, including the
+    variable-stem one -- the extractor widened in candidate 2 earning its keep
+    on the next increment.
+  - NOT done: `scenicplus.networks.create_nx_graph` returns a TRIPARTITE
+    TF->Region->Gene graph; our `08_eGRN_network` is hand-rolled BIPARTITE and
+    collapses the region layer, so the enhancer behind each link is invisible.
+    Its input builder takes the legacy SCENICPLUS class, so reaching it from
+    MuData is the trade declined for candidate 2.
+
 Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
 2026-09-09; artifacts not inspected here). The PARAMETERS have never been
 examined: the topic-count sweep, the DAR thresholds and the search-space width
