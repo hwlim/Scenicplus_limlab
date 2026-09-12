@@ -284,7 +284,7 @@ first: there is a trusted end-to-end result to diff against.
 | **I4** | `rules/report.smk` — steps 19–20 | figures render; the RSS PNG is ~12 Mpx, not 301 |
 | **I5** | per-rule resources + LSF profile | **built 2026-09-11, local gates only.** Tiers derived from `tests/measured_resources.tsv`; `tests/test_resources.py` + `dryrun.sh` 7b. Still wants a real cluster run |
 | **I6** | `report.html`, and `rule all` switched to it | **built 2026-09-11, local gates only.** `tests/report_render.sh` renders a partial workspace and asserts what the page says is MISSING; still wants a cluster run |
-| **I7** | provenance bundle (config.used, git, logs, `lsf_jobs.tsv`, `assembly.json`) | bundle from a failed run contains the failing log |
+| **I7** | provenance bundle (config.used, git, logs, `lsf_jobs.tsv`, `assembly.json`) | **built 2026-09-11, local gates only.** `tests/provenance.sh` runs a real workflow twice, once failing, and checks the stated gate directly; the last case runs the REAL Snakefile |
 | **I8** | retire `scenicplus_run_pipeline.sh` | the runner is the only entry point; `quickstart.md` and RUNBOOK both rewritten |
 
 ### I0 is built and gated, 2026-09-09
@@ -801,6 +801,83 @@ Same shape as the sibling repo's *an artifact written DURING a run cannot
 describe that run completely*, where a report's own missing log was once
 reported as evidence the run had been local. Second time this has been paid for;
 now it is a check.
+
+### I7 is built and gated, 2026-09-11
+
+`provenance/<timestamp>_<status>/` per run: `manifest.txt`, `config.used.yaml`,
+this run's `logs/`, `lsf_jobs.tsv`, `assembly.json`, `snakemake.log`, and
+`report.html` when there is one.
+
+    tests/provenance.sh          # 21 checks; runs a real workflow, twice
+
+**`--mode start` is the whole design, not bookkeeping.** The sibling repo's
+`provenance.sh` calls `git rev-parse HEAD` from its finish handler, so a
+checkout during the run makes the bundle name the commit someone switched TO --
+one that produced none of the outputs. The artifact whose entire job is to say
+what ran, stating something false, confidently. Here the commit is captured at
+`onstart` into `logs/.run_meta.json` and the finish pass reports what was
+RECORDED. With no record it prints `unknown` and says why, rather than
+substituting a fresh `rev-parse`: a plausible wrong commit is the failure being
+designed out, and both halves are asserted.
+
+**The bundle has to be most useful when the run FAILED.** A successful run is
+already described by `report.html`; this is the artifact for the run that
+stopped at rule 9 of 21 and has nothing else. So logs are bundled identically on
+both paths, and the manifest NAMES the logs carrying an error signature —
+"read these first" rather than a directory to search. When a run fails and no
+log carries one, it says that too, and points at scheduling.
+
+**Three things carried straight from the sibling repo's scars.** Logs are SCOPED
+by `logs/.run_started`, because `bsub -o` appends and `{jobid}` restarts at 0,
+so bundling an older run's log as this run's would misattribute a failure. The
+cap SKIPS rather than truncates, because the interesting part of a traceback is
+at the END and half a log is a trap. And a broken provenance script must not
+fail the run — bookkeeping taking down a finished run would be a worse bug than
+no bundle, so both calls are wrapped and degrade to a warning.
+
+**The gate runs a REAL workflow, twice.** Handlers do not fire on a dry run, an
+exception inside one aborts the workflow, and `log` is undocumented here — so
+calling the script by hand would exercise the easy half. Cases 1–6 use a
+miniature workflow mirroring the wiring; case 7 runs the REAL Snakefile to a
+guaranteed failure, because a typo in the real handlers would leave the first
+six green. Unwiring `onerror` turns exactly that case red. Four more mutations
+cover the design decisions: re-read HEAD at finish, bundle logs only on success,
+drop the scoping, truncate instead of skipping.
+
+**Two harness bugs, both mine, both instructive.** Snakemake FORMATS the shell
+string, so a rule body wrapped in `{ ... }` dies with *"NameError: the name
+' echo hello; touch out' is unknown"* — parentheses are inert. And a double
+quote inside a body interpolated into the generated Snakefile ends the Python
+string, killing the workflow AT PARSE, which reads exactly like "the handler did
+not run". The failing-run case now also asserts the rule actually EXECUTED, so
+the two cannot be confused again.
+
+**`report.html` is copied in, and its ABSENCE is stated.** The bundle is meant
+to be self-contained: the evidence and the readable summary travel together, and
+the report embeds its own figures, so the pair survives being moved off the
+cluster. On a failed run there is none, and a bundle that merely LACKS the file
+leaves a reader guessing between "never built" and "lost on the way here" — so
+the manifest carries `report.html: included, 0.90 MB` or `report.html: NOT
+INCLUDED -- snakemake does not build a target whose inputs failed`. Both are
+asserted, against two different bundles.
+
+That path shipped UNTESTED in the first cut of this increment: the copy was
+written and the gate checked four other files, so "the bundle carries the
+report" was a claim, not a result. Asked directly, it turned out to be true —
+which is luck, not evidence. Now it is checked by CONTENT, since a zero-byte
+copy satisfies a existence test and is useless.
+
+**Open, and deliberately not decided here: whether to keep every run's report.**
+The sibling repo has `provenance.keep_report` for exactly this, so the question
+is real rather than hypothetical. A report with embedded figures could be tens
+of MB, and one per run adds up in a workspace that is rerun often. Not added
+yet, because the threshold should come from a real report's size and none has
+been produced from a real GRN run. The manifest now prints that size, so the
+first real bundle answers it.
+
+**Not run on a cluster** in the sense that matters: no bundle has been produced
+from a real GRN run. The local runs are real snakemake invocations, but their
+failures are stand-in files, not science.
 
 **Not run on a cluster.** `report.html` has never been produced from a real
 `5.analysis/`; every check above is against a synthetic workspace. The empty-log
