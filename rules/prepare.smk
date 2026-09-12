@@ -148,6 +148,20 @@ rule R04_topic_modeling:
         script=script_path("scenicplus_04_topic_modeling.py"),
     output:
         pkl=stage_path("cistopic", "cistopic_obj_with_topics.pkl"),
+        # The model-selection figure. QC/ rather than the analysis stage, per
+        # the stage map: "model selection, cell and region counts per stage".
+        #
+        # ONLY THE COMBINED FIGURE IS DECLARED, though `--plot_metrics` writes
+        # four more beside it. Those four are named from pycisTopic's own axes
+        # TITLES ("Arun_2010 - Minimize"), so their filenames belong to the
+        # library, not to this workflow -- declaring them would turn an upstream
+        # wording change into a MissingOutput failure on the most expensive rule
+        # in the pipeline. The combined figure's name is ours, so it is safe to
+        # require, and requiring it is what catches the sweep finishing without
+        # drawing anything. Same reasoning as the undeclared figures in
+        # rules/report.smk.
+        selection=[stage_path("qc", f"topic_model_selection.{ext}")
+                   for ext in ("pdf", "png")],
     log:
         log_path("R04_topic_modeling"),
     threads: n_cpu()
@@ -161,12 +175,14 @@ rule R04_topic_modeling:
                        "resources.seed"),
         config_file=CONFIG_FILE,
         tmp_dir=os.path.join(config.get("output", {}).get("tmp", "tmp"), "lda"),
+        qc_dir=stage_dir("qc"),
     shell:
         "python {input.script}"
         " --in_pkl {input.pkl:q}"
         " --out_pkl {output.pkl:q}"
         " --config {params.config_file:q}"
         " --tmp_dir {params.tmp_dir:q}"
+        " --qc_dir {params.qc_dir:q} --plot_metrics"
         " --n_cpu {threads}"
         " 2>&1 | tee {log}"
 

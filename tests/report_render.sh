@@ -85,6 +85,26 @@ printf 'TF\tn_targets\n' > "$WS/5.analysis/tsv/TF_summary.tsv"
 printf 'SPIB\t42\nLEF1\t17\n' >> "$WS/5.analysis/tsv/TF_summary.tsv"
 # eRegulons_extended.tsv and eRegulons_combined.tsv are DELIBERATELY ABSENT.
 
+# Model-selection figures, as step 04 now writes them. The combined plot plus
+# one per-metric panel, so the section's ordering (combined first) is exercised.
+python3 - "$WS/QC" <<'PY'
+import struct, sys, zlib, os
+out = sys.argv[1]
+def png(path, w, h):
+    raw = b"".join(b"\x00" + bytes((x * 5 + y) % 256 for x in range(w * 3))
+                   for y in range(h))
+    def chunk(tag, data):
+        c = tag + data
+        return struct.pack(">I", len(data)) + c + struct.pack(">I", zlib.crc32(c))
+    open(path, "wb").write(
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(raw, 0)) + chunk(b"IEND", b""))
+png(os.path.join(out, "topic_model_selection.png"), 12, 8)
+png(os.path.join(out, "topic_model_selection_mimno_2011_maximize.png"), 12, 8)
+PY
+open "$WS/QC/topic_model_selection.pdf" 2>/dev/null || printf '%%PDF-1.4\n%%%%EOF\n' > "$WS/QC/topic_model_selection.pdf"
+
 cat > "$WS/QC/assembly.json" <<'JSN'
 {"assembly_detected": "hg38", "assembly_configured": "hg19",
  "n_chromosomes": 24, "n_annotation_rows": 1200,
@@ -168,6 +188,19 @@ has "...and the page explains why it reads as 0 bytes" "written after this page"
 has "...naming the mechanism, not just asserting it"   "cannot describe that run"
 
 # --- 3. the assembly mismatch, which is the one real alarm -------------------
+has "the model-selection section renders"         "Model selection"
+has "...showing the combined sweep figure"        "topic_model_selection.png"
+has "...explaining that rescaling can mislead"    "flatter a weak optimum"
+# ONLY the combined figure is shown. The per-metric panels are written and are
+# pointed at, not rendered -- five near-identical line plots is more page than a
+# QC detail earns. Both halves asserted: shown-once, and named-not-shown.
+qc_imgs="$(grep -o '<img src="[^"]*" alt="topic_model_selection[^"]*"' "$OUT" | wc -l)"
+[[ "$qc_imgs" == "1" ]] \
+  && say ok "exactly ONE model-selection figure is embedded" \
+  || say FAIL "expected 1 embedded model-selection figure, got $qc_imgs"
+has "...and the per-metric panels are POINTED AT"  "panel(s) alongside this one"
+has "...naming the QC folder they are in"          "QC/"
+has "...and the all-panels PDF"                    "topic_model_selection_all_pages.pdf"
 has "an assembly mismatch is raised loudly"       "Assembly mismatch"
 has "...naming both sides"                        "hg19"
 has "unannotated peak chromosomes are named"      "chrM"

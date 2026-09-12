@@ -325,6 +325,77 @@ def sec_assembly(path):
     return out
 
 
+def sec_qc_figures(qc_dir, ws, max_bytes):
+    """Figures from QC/, which today means topic-model selection.
+
+    A SEPARATE SECTION from Figures, because these describe how the run was
+    PARAMETERISED rather than what it found. The topic count is the single most
+    consequential number in the whole pipeline -- every downstream region set
+    derives from it -- and until step 04 was made to draw these, it was chosen
+    by four metrics that were computed and discarded. Showing them is the
+    difference between a chosen number and an evidenced one.
+
+    Absent for any workspace whose sweep predates that change, which is the
+    normal case for a while, so it says so rather than looking broken.
+    """
+    out = ["<h2 id=qc>Model selection</h2>"]
+    figs = sorted(f for f in os.listdir(qc_dir)
+                  if f.endswith(".png")) if os.path.isdir(qc_dir) else []
+    if not figs:
+        return "\n".join(out) + missing(
+            "topic-model selection figures",
+            "this workspace's sweep ran before step 04 drew them; re-running "
+            "R04_topic_modeling produces them")
+    # ONLY THE COMBINED FIGURE IS SHOWN. The per-metric panels are written too
+    # and are the honest unscaled read, but five near-identical line plots is
+    # more page than a QC detail earns -- so the section shows the one that
+    # answers "was the optimum clear?" and NAMES where the rest are. Chosen
+    # STRUCTURALLY rather than by filename: a per-metric panel's stem extends
+    # the combined one's, so the combined figure is the stem no other file
+    # extends. No hardcoded name to drift.
+    stems = {os.path.splitext(f)[0] for f in figs}
+
+    def is_panel(f):
+        """A per-metric panel EXTENDS another figure's stem.
+
+        `topic_model_selection_mimno_2011_maximize` extends
+        `topic_model_selection`, so the combined figure is the one nothing else
+        is built on top of. Written the other way round first, which selected
+        the panel and dropped the combined plot -- caught by the gate asserting
+        WHICH figure appears, not merely that one does.
+        """
+        me = os.path.splitext(f)[0]
+        return any(other != me and me.startswith(other + "_") for other in stems)
+
+    shown = [f for f in figs if not is_panel(f)] or figs
+    extras = sorted(set(figs) - set(shown))
+    rel_qc = os.path.relpath(qc_dir, ws)
+    note = ('Four metrics across every topic count in '
+            '<code>cistopic.n_topics</code>, rescaled onto one axis and '
+            'oriented so higher is better. Rescaling is convenient and can '
+            'flatter a weak optimum, so the unscaled per-metric panels are '
+            'worth opening when the choice looks marginal.')
+    if extras:
+        note += (f' They are not shown here: {len(extras)} panel(s) alongside '
+                 f'this one in <code>{esc(rel_qc)}/</code>, plus '
+                 f'<code>topic_model_selection_all_pages.pdf</code> with every '
+                 f'panel in one file.')
+    out.append(f'<p class="note">{note}</p>')
+    for f in shown:
+        full = os.path.join(qc_dir, f)
+        rel = os.path.relpath(full, ws)
+        src, note = embed_or_link(full, rel, max_bytes)
+        pdf = os.path.splitext(rel)[0] + ".pdf"
+        cap = [f"<code>{esc(rel)}</code>"]
+        if os.path.exists(os.path.join(ws, pdf)):
+            cap.append(f'<a href="{esc(pdf)}">PDF</a>')
+        if note:
+            cap.append(note)
+        out.append(f'<figure><img src="{src}" alt="{esc(f)}">'
+                   f'<figcaption>{" &middot; ".join(cap)}</figcaption></figure>')
+    return "\n".join(out)
+
+
 def sec_tables(tsv_dir, head_rows):
     out = ["<h2 id=tables>eRegulon tables</h2>"]
     if not os.path.isdir(tsv_dir):
@@ -506,6 +577,7 @@ def build(ws, cfg_path, repo, head_rows, max_bytes, self_log=None):
     parts = [
         sec_run(cfg, cfg_path, ws, repo),
         sec_assembly(j("QC", "assembly.json")),
+        sec_qc_figures(j("QC"), ws, max_bytes),
         sec_tables(j("5.analysis", "tsv"), head_rows),
         sec_figures(j("5.analysis", "plots"), ws, max_bytes),
         sec_compute(j("logs", "lsf")),
@@ -514,6 +586,7 @@ def build(ws, cfg_path, repo, head_rows, max_bytes, self_log=None):
     ]
     toc = """<div class="toc"><strong>On this page</strong><ul>
 <li><a href="#run">Run</a></li><li><a href="#genome">Genome</a></li>
+<li><a href="#qc">Model selection</a></li>
 <li><a href="#tables">eRegulon tables</a></li><li><a href="#figures">Figures</a></li>
 <li><a href="#compute">Compute</a></li><li><a href="#logs">Logs</a></li>
 <li><a href="#config">Configuration</a></li></ul></div>"""
