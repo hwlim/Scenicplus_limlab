@@ -67,7 +67,8 @@ def png(path, w, h):
         b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
         + chunk(b"IDAT", zlib.compress(raw, 0)) + chunk(b"IEND", b""))
 for stem in ("01_umap_celltype", "04_heatmap_dotplot_direct",
-             "06_TF_target_count", "99_unexpected_extra"):
+             "06_TF_target_count", "09_region_overlap_direct",
+             "99_unexpected_extra"):
     png(os.path.join(out, stem + ".png"), 8, 8)
 # ~6 MB uncompressed, comfortably over the 1 MB budget the test passes.
 png(os.path.join(out, "08_eGRN_network_top50.png"), 900, 2200)
@@ -170,6 +171,12 @@ grep -qF 'Not in this run:</strong> eRegulons_extended.tsv' "$OUT" \
 has "the summary row still reports it absent"     "absent"
 has "...and marked as missing"                    "Not in this run"
 has "an absent figure family is reported"         "figure 02_"
+# 09_/10_ are the region-overlap pair. The direct one is in the fixture and the
+# extended one is not, so both halves of FIGURE_ORDER's handling are exercised
+# in the same render: a family that is present and one that is not.
+has "the region-overlap figure is placed, not dumped in Other" "Target-region overlap, direct"
+has "...with the caption that says what to read"  "one finding reported twice"
+has "...and its missing twin is reported"         "figure 10_"
 has "an empty log is called out"                  "R20_visualize.log"
 
 # The report's OWN log is empty on every real run: tee creates it at job start

@@ -129,6 +129,17 @@ rejects("a search space with one bound where the CLI takes two",
 rejects("a quantile above 1",
         lambda c: set_in(c, "grn", "quantile_thresholds_region_to_gene", [0.9, 1.5]))
 
+# overlap_top_n is a COUNT OF eREGULONS entering a pairwise matrix, so one is
+# not a comparison and a fraction is not a count. `minimum: 2` rather than 1,
+# because the figure needs two things to overlap -- the script skips at one and
+# the schema should say so rather than leaving it to a runtime message.
+rejects("an overlap_top_n of 1, which is not a comparison",
+        lambda c: set_in(c, "visualization", "overlap_top_n", 1))
+rejects("a fractional overlap_top_n",
+        lambda c: set_in(c, "visualization", "overlap_top_n", 12.5))
+rejects("a typo'd visualization key",
+        lambda c: set_in(c, "visualization", "overlap_topn", 40))
+
 # --- shapes that must STAY legal --------------------------------------------
 # Guarding the other direction: a schema that rejects a valid config is a worse
 # failure than a loose one, because it blocks a run that would have worked.
@@ -159,6 +170,8 @@ keeps("an omitted optional section",
 
 keeps("an empty celltype_scope, meaning `every cell`",
       lambda c: set_in(c, "input", "celltype_scope", []))
+keeps("a raised overlap_top_n, which is the reason the key exists",
+      lambda c: set_in(c, "visualization", "overlap_top_n", 120))
 
 print()
 if FAILURES:

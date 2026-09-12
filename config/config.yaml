@@ -172,3 +172,4 @@ visualization:
   top_n_eRegulons_per_celltype: 5
   network_top_n_TFs: 10
   network_top_n_targets_per_TF: 25
+  overlap_top_n: 40            # eRegulons in the region-overlap heatmap

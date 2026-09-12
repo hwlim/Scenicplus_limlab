@@ -66,6 +66,101 @@ def save(fig, out_dir: Path, name: str):
             f"neither .savefig() (matplotlib) nor .save() (plotnine)")
 
 
+def region_overlap(meta, out_dir, source, top_n):
+    """Pairwise Jaccard overlap of eRegulons' TARGET REGION sets.
+
+    What it answers: how much do these regulons actually differ? Two eRegulons
+    sharing most of their regions are one finding reported twice -- co-binding
+    TFs, or a motif matched by a family -- and the eRegulon tables alone cannot
+    show that, because each row is a triplet and the redundancy only appears
+    when the sets are compared.
+
+    BUILT HERE RATHER THAN CALLED. `scenicplus.plotting.correlation_plot`
+    ships `jaccard_heatmap`, but it takes the LEGACY `SCENICPLUS` class while
+    this pipeline produces MuData -- which is why `heatmap_dotplot` is called
+    with `scplus_mudata=`. Constructing a legacy object to reach one plotting
+    function would put a second representation of the run in the codebase, to
+    be kept in step forever, for a Jaccard matrix that is a groupby and a
+    pairwise loop. The region sets are already in the metadata this rule reads.
+
+    TOP-N BY REGION COUNT, and the cut is stated on the figure. All eRegulons
+    can be several hundred, which is an unreadable heatmap and a slow one --
+    the matrix is quadratic. Ranking by set size keeps the regulons with
+    something to overlap; a random or alphabetical cut would not.
+    """
+    if meta is None or len(meta) == 0 or "Region" not in meta.columns:
+        print(f"[viz] region_overlap skipped for {source}: no region metadata")
+        return
+    sets = (meta.groupby("eRegulon_name", observed=True)["Region"]
+                .agg(lambda x: frozenset(x)))
+    sets = sets[sets.map(len) > 0]
+    if len(sets) < 2:
+        print(f"[viz] region_overlap skipped for {source}: "
+              f"{len(sets)} eRegulon(s), nothing to compare")
+        return
+    order = sets.map(len).sort_values(ascending=False)
+    keep = order.head(top_n).index.tolist()
+    sets = sets[keep]
+
+    import numpy as np
+    names = list(sets.index)
+    n = len(names)
+    m = np.eye(n)
+    for i in range(n):
+        a = sets.iloc[i]
+        for j in range(i + 1, n):
+            b = sets.iloc[j]
+            inter = len(a & b)
+            # Jaccard, and 0/0 cannot arise: empty sets were dropped above.
+            m[i, j] = m[j, i] = inter / len(a | b)
+    df = pd.DataFrame(m, index=names, columns=names)
+
+    import seaborn as sns
+    # Clustered, because the block structure IS the finding -- an alphabetical
+    # order hides exactly the groups of redundant regulons this exists to show.
+    # A degenerate matrix (every pair identical) makes linkage complain rather
+    # than fail, so fall back to the given order instead of losing the figure.
+    try:
+        g = sns.clustermap(df, cmap="rocket_r", vmin=0, vmax=1,
+                           figsize=(min(2 + 0.28 * n, 24), min(2 + 0.28 * n, 24)),
+                                                      xticklabels=True, yticklabels=True)
+    except Exception as e:
+        print(f"[viz] region_overlap: clustering failed ({e}); unclustered")
+        g = sns.clustermap(df, cmap="rocket_r", vmin=0, vmax=1,
+                           row_cluster=False, col_cluster=False,
+                           figsize=(min(2 + 0.28 * n, 24), min(2 + 0.28 * n, 24)),
+                                                      xticklabels=True, yticklabels=True)
+    g.ax_heatmap.tick_params(labelsize=6)
+    # seaborn parks the colourbar top-LEFT by default, where a suptitle lands on
+    # top of it and its rotated label runs through the row dendrogram. Both were
+    # visible only by opening the emitted PNG -- the same lesson as the
+    # 301-megapixel RSS figure that was "successful" for a day. Moved to the
+    # bottom-left gutter, under the dendrogram, where nothing else is drawn.
+    g.cax.set_position([0.02, 0.06, 0.02, 0.14])
+    g.cax.tick_params(labelsize=7)
+    g.cax.set_ylabel("Jaccard", fontsize=8)
+    total = len(order)
+    # Title on the heatmap axes, not the figure: a suptitle sits above the
+    # dendrogram and drifts with figsize, which here scales with the eRegulon
+    # count.
+    g.ax_heatmap.set_title(
+        f"{source} eRegulons: target-region overlap "
+        f"({n} of {total} shown, largest region sets first)",
+        fontsize=11, pad=12)
+    stem = "09_region_overlap_direct" if source == "direct" \
+        else "10_region_overlap_extended"
+    save(g.figure, out_dir, stem)
+
+    # The matrix itself, because a heatmap is not a number anyone can act on
+    # and the project's contract pairs every figure with a data sheet.
+    #
+    # BESIDE THE FIGURE, not in `tsv/`. That directory is R19's output and R19
+    # is a different rule; two rules writing one directory is the ownership
+    # problem the sibling repo states as an invariant, and snakemake would not
+    # know about it. A .tsv in plots/ reads slightly oddly and is correct.
+    df.to_csv(out_dir / f"09_region_overlap_{source}.tsv", sep="\t")
+
+
 def make_eRegulon_adata(md):
     parts = []
     for k in ["direct_gene_based_AUC", "extended_gene_based_AUC"]:
@@ -325,6 +420,8 @@ def main():
     extended = md.uns.get("extended_e_regulon_metadata", pd.DataFrame())
     combined = pd.concat([direct, extended], ignore_index=True) \
         if (len(direct) + len(extended)) else pd.DataFrame()
+    region_overlap(direct, out_dir, "direct", viz.get("overlap_top_n", 40))
+    region_overlap(extended, out_dir, "extended", viz.get("overlap_top_n", 40))
     tf_target_count(combined, out_dir, top_n=40)
     tf_importance_density(combined, out_dir, top_n=viz["network_top_n_TFs"])
     network_plot(combined, out_dir,
