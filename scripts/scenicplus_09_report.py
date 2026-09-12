@@ -267,6 +267,19 @@ def sec_run(cfg, cfg_path, ws, repo):
     scope = inp.get("celltype_scope") or []
     if scope:
         rows.append(("Cell-type scope", ", ".join(map(str, scope))))
+    # The two artifacts should be discoverable from each other. Deliberately
+    # NOT naming this run's bundle: it is written by `onsuccess`, after this
+    # page, so any bundle visible from here belongs to an EARLIER run. Naming
+    # one would be the "an artifact written during a run cannot describe that
+    # run" mistake in its other direction.
+    prov = os.path.join(ws, "provenance")
+    n_prev = len([d for d in os.listdir(prov)
+                  if os.path.isdir(os.path.join(prov, d))]) \
+        if os.path.isdir(prov) else 0
+    rows.append(("Provenance", f"provenance/ \u2014 one bundle per run "
+                               f"(commit, config, logs, LSF accounting). "
+                               f"This run's is written after this page; "
+                               f"{n_prev} earlier one(s) present."))
     body = "".join(f"<tr><th>{esc(k)}</th><td>{esc(v)}</td></tr>" for k, v in rows)
     return f"<h2 id=run>Run</h2><table><tbody>{body}</tbody></table>"
 

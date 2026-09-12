@@ -544,6 +544,57 @@
     purpose is measurement.
   - R21_report still needs the same treatment after the first run including it.
 
+20260911: Snakemake workflow, increment I7 -- the provenance bundle
+  - `provenance/<ts>_<status>/` per run: manifest, config.used.yaml, this run's
+    logs, lsf_jobs.tsv, assembly.json, snakemake.log, report.html when there is
+    one. Written by onsuccess AND onerror.
+  - **`--mode start` exists for one reason.** The sibling repo's provenance.sh
+    runs `git rev-parse HEAD` in its FINISH handler, so a checkout mid-run makes
+    the bundle name a commit that produced none of the outputs -- the artifact
+    whose job is to say what ran, stating something false. Here the commit is
+    captured at onstart into `logs/.run_meta.json` and reported verbatim. With
+    no record it prints `unknown` and says why rather than substituting a fresh
+    rev-parse; both halves are asserted, because the plausible-wrong-answer case
+    is the one being designed out.
+  - **The bundle must be most useful when the run FAILED** -- a green run is
+    already described by report.html. Logs bundle identically on both paths, and
+    the manifest NAMES the ones carrying an error signature. When a run fails
+    and none does, it says so and points at scheduling instead.
+  - Three behaviours carried from the sibling's scars: logs SCOPED by
+    `logs/.run_started` (bsub -o appends, {jobid} restarts at 0, so an older
+    run's log bundled as this one's misattributes a failure); the cap SKIPS
+    rather than truncates (the interesting part of a traceback is at the END);
+    and a broken provenance script must NOT fail the run.
+  - **The gate runs a real workflow twice, one of them failing.** Handlers do
+    not fire on dry runs, so nothing else could cover this. Cases 1-6 mirror the
+    wiring in a miniature workflow; case 7 runs the REAL Snakefile to a
+    guaranteed failure, because a typo in the real handlers would leave the
+    first six green -- unwiring onerror turns exactly that case red. Four more
+    mutations cover the design decisions.
+  - **Two harness bugs, both mine.** Snakemake FORMATS the shell string, so a
+    rule body wrapped in `{ }` dies with "NameError: the name ' echo hello;
+    touch out' is unknown"; parentheses are inert. And a double quote inside an
+    interpolated body ends the Python string in the generated Snakefile, killing
+    it AT PARSE -- which reads exactly like "the handler did not run". The
+    failing case now also asserts the rule EXECUTED, so those cannot be confused
+    again.
+  - report.html now points at `provenance/`, deliberately WITHOUT naming this
+    run's bundle: it is written after the page, so any bundle visible from there
+    belongs to an earlier run.
+  - **report.html is copied into the bundle, and its ABSENCE is stated.** Asked
+    directly whether it was, and it was -- but the gate checked four other files
+    and not that one, so it was a CLAIM rather than a result. Now checked by
+    content (a zero-byte copy passes an existence test), and the failed-run path
+    asserts the manifest explains why there is none. Being right by luck is the
+    thing to notice there, not the fact that it worked.
+  - Open: whether to keep every run's report. The sibling repo has
+    `provenance.keep_report`, so the question is real. A report with embedded
+    figures could be tens of MB and there is one per run. Deferred rather than
+    guessed -- the manifest now prints the size, so the first real bundle
+    supplies the number the decision needs.
+  - No bundle from a real GRN run yet. The local runs are real snakemake
+    invocations, but they fail on stand-in files, not on science.
+
 Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
 2026-09-09; artifacts not inspected here). The PARAMETERS have never been
 examined: the topic-count sweep, the DAR thresholds and the search-space width

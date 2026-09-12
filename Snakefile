@@ -85,10 +85,35 @@ rule all:
         TARGETS
 
 
-# --- Run banner and outcome --------------------------------------------------
-# I7 replaces the two handlers below with a provenance bundle: config.used,
-# git description, the logs, lsf_jobs.tsv and assembly.json. Until then they
-# say where to look, which is the part people actually need when a run stops.
+# --- Run banner, provenance, and outcome --------------------------------------
+# I7: the handlers below bracket the run with a provenance bundle.
+#
+# `--mode start` is NOT bookkeeping that could be folded into the finish pass.
+# It captures the pipeline's COMMIT while the run is starting, because the
+# sibling repo's `provenance.sh` calls `git rev-parse HEAD` from its finish
+# handler and therefore records the commit someone switched TO mid-run -- one
+# that produced none of the outputs. An artifact whose whole job is to say what
+# ran, stating something false, confidently. Captured early, reported verbatim.
+#
+# Failures inside a handler abort the run, and provenance must never be the
+# reason a finished run is reported as failed -- so both calls are wrapped and
+# a broken bundle degrades to a printed warning.
+def _provenance(mode, **kw):
+    import subprocess
+    cmd = ["python", os.path.join(workflow.basedir, "scripts",
+                                  "scenicplus_provenance.py"),
+           "--mode", mode, "--workspace", ".",
+           "--pipeline", workflow.basedir]
+    for k, v in kw.items():
+        if v:
+            cmd += [f"--{k.replace('_', '-')}", str(v)]
+    try:
+        subprocess.run(cmd, check=True)
+    except Exception as e:
+        print(f"[scenicplus] provenance {mode} failed ({e}); the run itself is "
+              f"unaffected and the logs are still in {stage_dir('logs')}/")
+
+
 onstart:
     species = config["input"]["species"]
     print(f"[scenicplus] species={species} -> {SPECIES_INFO['assembly']}, "
@@ -98,12 +123,15 @@ onstart:
               "would prove nothing.")
     else:
         print("[scenicplus] all 20 steps + report.html (increment I6).")
+    _provenance("start")
 
 
 onsuccess:
     # Name the report, not the directory. The whole point of I6 is that the run
     # is not finished until someone can read it, and a path they have to
     # assemble themselves is one they do not open.
+    _provenance("finish", config=CONFIG_FILE, status="success",
+                snakemake_log=log)
     print(f"[scenicplus] done. Open {os.path.abspath('report.html')}")
     print(f"[scenicplus] logs in {stage_dir('logs')}/")
 
@@ -119,3 +147,9 @@ onerror:
     # the provenance bundle).
     print("[scenicplus] NO report.html: snakemake does not build a target "
           "whose inputs failed. The logs above are the record of this run.")
+    # THE BUNDLE IS THE POINT ON THIS PATH. A successful run is already
+    # described by report.html; this is the run that has nothing else, so the
+    # bundle carries the scoped logs, names the ones with an error signature,
+    # and records the commit captured at onstart.
+    _provenance("finish", config=CONFIG_FILE, status="error",
+                snakemake_log=log)
