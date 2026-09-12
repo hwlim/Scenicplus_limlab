@@ -482,7 +482,7 @@ def sec_figures(plots_dir, ws, max_bytes):
     return "\n".join(out)
 
 
-def sec_compute(lsf_dir):
+def sec_compute(lsf_dir, self_rule=None):
     out = ["<h2 id=compute>Compute</h2>"]
     rows = lsf_accounting(lsf_dir)
     if not rows:
@@ -509,6 +509,20 @@ def sec_compute(lsf_dir):
                f'rules run at once. Peak memory is LSF\'s figure for the whole '
                f'process TREE, while <code>-M</code> is enforced per process, '
                f'so a total above the reservation is not a breach.</p>')
+    # THIS RULE'S OWN JOB IS NECESSARILY ABSENT, and the table has to say so.
+    # LSF appends a job's accounting block when the job ENDS, so while R21 is
+    # rendering this page its own epilogue does not exist yet -- the same shape
+    # as its log reading 0 bytes in the Logs section. Reported from a real run:
+    # R21 appeared under Logs and not under Compute, which reads as a missing
+    # job rather than as arithmetic. An artifact written DURING a run cannot
+    # describe that run completely, and this is the second face of it.
+    if self_rule and not any(r.get("rule") == self_rule for r in rows):
+        out.append(f'<p class="note"><code>{esc(self_rule)}</code> is NOT in the '
+                   f'table above, and that is structural rather than a missing '
+                   f'job: LSF appends a job\u2019s accounting when the job ends, '
+                   f'so this rule\u2019s own epilogue does not exist while this '
+                   f'page is being written. Read it on disk afterwards \u2014 '
+                   f'the same reason its log reads 0 bytes below.</p>')
     if len(nodes) > 1:
         out.append('<p class="note">More than one node: floating-point '
                    'differences between rules are expected and are '
@@ -597,7 +611,9 @@ def build(ws, cfg_path, repo, head_rows, max_bytes, self_log=None):
         sec_qc_figures(j("QC"), ws, max_bytes),
         sec_tables(j("5.analysis", "tsv"), head_rows),
         sec_figures(j("5.analysis", "plots"), ws, max_bytes),
-        sec_compute(j("logs", "lsf")),
+        sec_compute(j("logs", "lsf"),
+                    os.path.splitext(os.path.basename(self_log))[0]
+                    if self_log else None),
         sec_logs(j("logs"), ws, self_log),
         sec_config(cfg_path),
     ]
