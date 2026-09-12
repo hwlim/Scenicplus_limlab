@@ -313,6 +313,56 @@ else
     say ok "...and does not name the obsolete launchers"
 fi
 
+# 7f. the ORCHESTRATOR is not itself an LSF job, and the docs must say so.
+#
+# `--lsf` submits one bsub per RULE. Snakemake stays in the calling shell and is
+# the only thing polling LSF and scheduling the next rule, so a dropped ssh
+# session halts the run halfway -- the queued jobs finish, nothing starts what
+# follows, and NOTHING FAILS. Every document said "--lsf submits each rule as
+# its own job" and stopped there, which reads as though the whole thing were
+# submitted; the retired `scenicplus_run_lsf.sh` really did bsub the driver, so
+# the conversion tables were promising a property the replacement had dropped.
+_BSUB_TMPL="$SCENICPLUS_PATH/scripts/scenicplus.bsub.sh"
+if bash -n "$_BSUB_TMPL" 2>"$WORK/bsub.err"; then
+    say ok "scenicplus.bsub.sh parses"
+else
+    say FAIL "scenicplus.bsub.sh has a syntax error"; sed -n '1,3p' "$WORK/bsub.err"
+fi
+python3 - "$_BSUB_TMPL" "$SCENICPLUS_PATH" <<'PY' >"$WORK/bsub.txt" 2>&1
+import os, re, sys
+tmpl, root = sys.argv[1], sys.argv[2]
+t = open(tmpl).read()
+bad = []
+# The directives LSF needs. -W above all: an orchestrator that hits its own
+# runlimit produces exactly the silent halt this file exists to prevent.
+for flag in ("-n", "-W", "-M", "-J", "-oo", "-eo"):
+    if not re.search(rf"^#BSUB {re.escape(flag)}\b", t, re.M):
+        bad.append(f"the template has no `#BSUB {flag}` line")
+# It must drive the RUNNER. Pointing a new wrapper at the retired driver would
+# reintroduce the one-oversized-job problem the workflow exists to fix.
+if "scenicplus.run.sh" not in t:
+    bad.append("the template does not invoke scenicplus.run.sh")
+if re.search(r"scenicplus_run_(pipeline|workstation|lsf)\.sh", t):
+    bad.append("the template names an obsolete launcher")
+
+# Every document that tells someone to use --lsf must also name the wrapper.
+# Coarse on purpose: what must not happen is the warning being dropped while
+# the --lsf recipe stays.
+for d in ("RUNBOOK.md", "quickstart.md", "README.md",
+          "scripts/scenicplus.run.sh", "CLAUDE.md"):
+    text = open(os.path.join(root, d)).read()
+    if "--lsf" in text and "scenicplus.bsub.sh" not in text:
+        bad.append(f"{d}: documents --lsf without pointing at scenicplus.bsub.sh")
+print("\n".join(bad) if bad else "template and 5 documents agree")
+sys.exit(1 if bad else 0)
+PY
+if [[ $? -eq 0 ]]; then
+    say ok "the bsub template is complete, and every --lsf doc points at it"
+else
+    say FAIL "the orchestrator-lifetime documentation has a hole"
+    sed -n '1,5p' "$WORK/bsub.txt"
+fi
+
 # 7b. the per-rule resources SNAKEMAKE RESOLVES, against the table they come
 #     from (I5).
 #

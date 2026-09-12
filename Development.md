@@ -923,6 +923,39 @@
     from "forcing from X onward" broke two existing assertions that quoted the
     old wording -- the wording being wrong is why it was changed.
 
+20260912: `--lsf` submits the RULES, not the runner -- reported by the user
+  - Clarification from the person who runs this on the cluster, and it is a gap
+    every document had: `scenicplus.run.sh --lsf` does NOT submit itself. It
+    runs snakemake in the calling shell, which issues one bsub per rule and is
+    the only thing polling LSF and scheduling the next one. Lose that shell --
+    ssh drop, login-node reboot, a sleeping laptop -- and the queued jobs finish
+    while nothing starts what follows. The run does not fail. It stops halfway
+    and says nothing, which is the worst way for a multi-hour job to end.
+  - **The conversion table made it a REGRESSION, not just an omission.** The
+    retired `scenicplus_run_lsf.sh` bsubbed the driver, so the whole pipeline
+    survived a dropped shell. quickstart.md mapped it to
+    `scenicplus.run.sh --lsf -j 20`, which does not -- a property silently
+    dropped in a row asserting equivalence. Same species as the `--from N` /
+    `-f N` row fixed earlier today: a conversion table is an untested claim.
+  - **`scripts/scenicplus.bsub.sh`**, a template to copy and edit:
+    `bsub < scenicplus.bsub.sh`. Two cores and 16 GB, because the orchestrator
+    polls rather than computes; the reservations that matter belong to the
+    rules it submits. Its `-W` must cover the WHOLE pipeline plus queue waits,
+    not the longest rule -- about two hours of compute for 21 rules, so the
+    template asks five. An orchestrator that hits its own runlimit reproduces
+    the same silent halt.
+  - Details worth keeping, all from the user's working example: `bsub < file`,
+    never `bsub file`, or LSF never reads the #BSUB lines; `-oo`/`-eo`
+    overwrite while `-o`/`-e` append, the same trap the rule logs have;
+    PYTHONNOUSERSITE and the LD_LIBRARY_PATH prefix, which install_cchmc.sh
+    already prints at the end of an install; and an explicit `cd`, since a
+    wrong working directory starts a SECOND workspace rather than failing.
+  - Gated as dryrun.sh 7f: the template parses, carries every #BSUB directive it
+    needs, drives the runner rather than a retired launcher, and every document
+    that shows `--lsf` names the wrapper. Three controls -- the warning removed
+    from RUNBOOK, `-W` deleted, the template repointed at the old driver -- each
+    turning it red.
+
 Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
 2026-09-09; artifacts not inspected here). The PARAMETERS have never been
 examined: the topic-count sweep, the DAR thresholds and the search-space width

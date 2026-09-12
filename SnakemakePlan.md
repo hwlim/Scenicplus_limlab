@@ -1488,8 +1488,16 @@ Each of these cost a real run in one repo or the other:
   the `-f N` fork examples come from the resolved graph and are checked against
   the prose. Both were hand-written first and both had already drifted.
 - **A retired tool's semantics outlive it in the docs.** `--from N` really did
-  mean "step N or higher"; `-f N` never did. When a replacement takes over,
-  every conversion table is a claim of equivalence that nobody tested.
+  mean "step N or higher"; `-f N` never did, and `scenicplus_run_lsf.sh` really
+  did bsub the whole pipeline while `scenicplus.run.sh --lsf` leaves the
+  orchestrator in your shell. When a replacement takes over, every conversion
+  table is a claim of equivalence that nobody tested — and the property most
+  easily dropped is the one nobody wrote down.
+- **`--lsf` submits the RULES; the orchestrator stays in the calling shell.**
+  It is the only thing polling LSF and scheduling the next rule, so losing the
+  shell halts the run halfway with no error anywhere. Put it in its own small
+  batch job (`scripts/scenicplus.bsub.sh`) whose walltime covers the whole
+  pipeline plus queue waits.
 - **One predicate, two call sites, one of them scoped.** Sharing the *function*
   is not sharing the *behaviour* — the argument has to be passed at every call.
   This shipped twice here: the report had no scoping while the bundle did, and
