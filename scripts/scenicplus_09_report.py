@@ -352,9 +352,23 @@ def sec_assembly(path):
     except (OSError, ValueError) as e:
         return h + missing("QC/assembly.json", f"unreadable: {e}")
     unann = rec.get("peak_chromosomes_unannotated") or []
+    # KEY NAMES FROM THE PRODUCER, not from memory. This block first read
+    # `assembly_detected` / `assembly_configured`, which scenicplus_genome_
+    # prepare.py has never written -- both rows showed "?" on a real report, and
+    # the mismatch panel below them could never have fired. The record's actual
+    # shape is richer: `assembly` is what the config asked for, `chr1_bp` is the
+    # measurement, and `chr1_matches` is what that length actually corresponds
+    # to. That last one IS the detected assembly.
+    configured = rec.get("assembly")
+    chr1, detected = rec.get("chr1_bp"), rec.get("chr1_matches")
     rows = [
-        ("Detected assembly", rec.get("assembly_detected", "?")),
-        ("Configured assembly", rec.get("assembly_configured", "?")),
+        ("Species", rec.get("species", "?")),
+        ("Assembly (configured)", configured or "NOT SET"),
+        ("Chromosome 1", f"{chr1:,} bp" if isinstance(chr1, int) else "?"),
+        ("...which is", detected or "an assembly not in the reference table"),
+        # The Ensembl-vs-UCSC naming split cost this pipeline a run and was not
+        # shown at all before.
+        ("Chromosome naming", rec.get("chromosome_naming", "?")),
         ("Chromosomes", rec.get("n_chromosomes", "?")),
         ("Annotation rows", f'{rec.get("n_annotation_rows", 0):,}'),
         ("Peak chromosomes", rec.get("peak_chromosomes", "?")),
@@ -362,12 +376,29 @@ def sec_assembly(path):
     ]
     body = "".join(f"<tr><th>{esc(k)}</th><td>{esc(v)}</td></tr>" for k, v in rows)
     out = h + f"<table><tbody>{body}</tbody></table>"
-    det, conf = rec.get("assembly_detected"), rec.get("assembly_configured")
-    if det and conf and str(det) != str(conf):
-        out += (f'<div class="miss"><strong>Assembly mismatch:</strong> the '
-                f'chromsizes say {esc(det)}, the config says {esc(conf)}. '
-                f'Coordinates will not line up and nothing downstream will say '
-                f'so.</div>')
+    # NOT a mismatch warning. R07 calls die() when chromosome 1's length
+    # disagrees with `input.assembly`, so a mismatched run never reaches this
+    # page -- a panel warning about it would be unreachable code pretending to
+    # be a safeguard. What IS worth saying is which of the two situations the
+    # reader is in, because they differ entirely.
+    if configured and detected and str(configured) == str(detected):
+        out += (f'<div class="ok"><strong>Assembly confirmed.</strong> '
+                f'Chromosome 1 measures {chr1:,} bp, which is {esc(detected)}, '
+                f'matching <code>input.assembly</code>. R07 refuses the run when '
+                f'these disagree, so reaching this page means the check '
+                f'passed.</div>')
+    elif not configured:
+        out += ('<div class="miss"><strong>Assembly NOT confirmed:</strong> '
+                '<code>input.assembly</code> is unset, so nothing checked '
+                'chromosome 1\u2019s length against it. This is the open door to '
+                'the GRCm39 problem \u2014 Ensembl serves GRCm39 for mouse, and '
+                'against mm10 data the coordinates are wrong while everything '
+                'still runs. Set it.</div>')
+    elif configured and not detected:
+        out += (f'<div class="miss"><strong>Assembly unrecognised:</strong> '
+                f'chromosome 1 measures {chr1:,} bp, which is not in the '
+                f'reference table, so <code>{esc(configured)}</code> could not be '
+                f'confirmed.</div>')
     if unann:
         out += (f'<p class="note">{len(unann)} peak chromosome(s) absent from '
                 f'the annotation: {esc(", ".join(map(str, unann[:12])))}'
