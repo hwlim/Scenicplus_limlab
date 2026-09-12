@@ -140,8 +140,26 @@ def scoped_logs(logs_dir, marker_mtime):
 
 # A log carrying one of these is worth naming in the manifest. Deliberately
 # short and boring: the aim is "look here first", not classification.
+#
+# THIS LIST USED TO MISS THE PIPELINE'S OWN REFUSALS, which is the failure mode
+# the bundle exists for. A crash leaves a traceback and matched; a DELIBERATE
+# refusal -- R07 catching mm10-versus-GRCm39, step 08 catching barcodes that do
+# not intersect -- prints a tidy explanation, exits 1, and matched nothing. The
+# manifest then said "NO log carries an error signature ... the failure may be
+# in scheduling" and pointed away from the log holding the answer. Two
+# additions close it:
+#
+#   FATAL          the marker every refusal now carries (see `_fatal()` in the
+#                  step scripts and `die()` in scenicplus_genome_prepare.py).
+#                  A tag alone could not work: the same "[genome]" prefix is on
+#                  this script's progress output.
+#   exit code N    the LSF epilogue for any non-zero exit, so a job that died
+#                  without printing anything recognisable is still found. `bsub
+#                  -o` appends the epilogue into the same scoped file.
 _TRACE = re.compile(r"^(Traceback \(most recent call last\)|Error in |"
                     r"\w*Error:|Exception:|Killed|Segmentation fault|"
+                    r".*\bFATAL\b|"
+                    r"Exited with exit code [1-9]|"
                     r"TERM_(MEMLIMIT|RUNLIMIT|OWNER))", re.M)
 
 
@@ -230,8 +248,19 @@ def mode_finish(ws, pipeline, cfg_path, status, cap_kb, snakemake_log):
                 pass
 
     # --- lsf_jobs.tsv ----------------------------------------------------------
+    # SCOPED BY THE SAME MARKER AS THE LOGS. It was not, and the omission was
+    # invisible because both halves looked right on a clean workspace: the logs
+    # went through scoped_logs() and this call passed no `since` at all, so on
+    # any second run the table carried every earlier run's rows while the logs
+    # beside it carried one run's. On the FAILED run this bundle exists for,
+    # that is a table of a previous, successful run presented as this one's.
+    #
+    # `lsf_accounting` has taken `since` since the report gained scoping; the
+    # argument was simply never passed here. Two call sites of one function,
+    # one of them scoped -- which is the shape scoped_logs()'s docstring warns
+    # about, in the same file.
     rep = _load_report_module()
-    rows = rep.lsf_accounting(os.path.join(logs_dir, "lsf")) if rep else []
+    rows = rep.lsf_accounting(os.path.join(logs_dir, "lsf"), since=mtime) if rep else []
     with open(os.path.join(out, "lsf_jobs.tsv"), "w") as fh:
         fh.write("rule\tnode\tslots\truntime_s\tmax_mem_mb\tmax_processes\t"
                  "max_threads\n")
@@ -262,7 +291,10 @@ def mode_finish(ws, pipeline, cfg_path, status, cap_kb, snakemake_log):
         f"python:        {meta.get('python', 'unknown')}",
         "",
         f"logs:          {logs_note}",
-        f"lsf_jobs:      {len(rows)} job(s) with accounting",
+        f"lsf_jobs:      {len(rows)} job(s) with accounting" + (
+            "" if mtime is not None else
+            " -- SCOPE UNKNOWN: no logs/.run_started, so this is every job in "
+            "logs/lsf/, not this run's"),
         f"report.html:   " + (
             f"included, {copied['report.html']/1e6:.2f} MB"
             if "report.html" in copied else

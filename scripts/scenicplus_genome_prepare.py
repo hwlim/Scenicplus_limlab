@@ -53,8 +53,15 @@ KNOWN_CHR1 = {248956422: "hg38/GRCh38", 249250621: "hg19/GRCh37",
 
 
 def die(*lines):
-    for ln in lines:
-        print(f"[genome] {ln}", file=sys.stderr)
+    # "FATAL" on the first line, because the provenance bundle greps for a
+    # signature and had none for this. Its scan matched tracebacks and kill
+    # messages; a DELIBERATE refusal here prints a tidy explanation, exits 1,
+    # and looked exactly like the progress lines this script also prints with
+    # the same "[genome]" tag. So the bundle for the mm10-versus-GRCm39 refusal
+    # -- the failure R07 exists to catch -- said no log carried an error
+    # signature and sent the reader to look at scheduling instead.
+    for i, ln in enumerate(lines):
+        print(f"[genome] {'FATAL: ' if i == 0 else ''}{ln}", file=sys.stderr)
     sys.exit(1)
 
 

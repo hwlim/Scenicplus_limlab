@@ -113,9 +113,20 @@ open "$WS/QC/topic_model_selection.pdf" 2>/dev/null || printf '%%PDF-1.4\n%%%%EO
 # the producer writes. Both rows rendered "?" on a real report and the mismatch
 # panel could never fire. A fixture written from the same imagination as the
 # code it checks is not a check.
+#
+# IT HAPPENED AGAIN, one level down, in the commit that wrote the paragraph
+# above: the key names were fixed and the VALUE was still invented. This file
+# said `"chr1_matches": "hg38"`; the producer writes `"hg38/GRCh38"`, one length
+# and both accepted spellings. The report compared the two with `==`, so on
+# every real report the Genome section printed no panel at all -- and this
+# fixture, carrying a value that cannot occur, called it CONFIRMED.
+# `tests/record_keys.py` now checks this literal against the producer's
+# KNOWN_CHR1 table, and `tests/genome_checks.sh` renders the section from a
+# record the producer actually wrote. Getting the names from the producer and
+# the values from imagination is the same defect with a smaller radius.
 cat > "$WS/QC/assembly.json" <<'JSN'
 {"generated": "2026-09-12T16:00:00+00:00", "species": "hsapiens",
- "assembly": "hg38", "chr1_bp": 248956422, "chr1_matches": "hg38",
+ "assembly": "hg38", "chr1_bp": 248956422, "chr1_matches": "hg38/GRCh38",
  "chromosome_naming": "UCSC",
  "n_chromosomes": 24, "n_annotation_rows": 1200,
  "n_annotation_chromosomes": 24, "peak_chromosomes": 25,
@@ -167,6 +178,32 @@ touch -t 202001010000 "$WS/logs/R98_ancient.log" \
 sleep 0.1
 : > "$WS/logs/.run_started"          # this run begins HERE
 sleep 0.1
+
+# The code identity, as `scenicplus_provenance.py --mode start` records it at
+# onstart. The report used to run `git describe` AT RENDER TIME instead -- in
+# the last rule of the run, on a compute node, hours later, against a SHARED
+# install someone may have checked out meanwhile. The bundle and the report
+# could then name different commits for one run, and the report is the artifact
+# people open. Values here are deliberately unlike anything this repo's real
+# git would return, so a fallback to a live `git` call cannot pass by accident.
+cat > "$WS/logs/.run_meta.json" <<'JSN'
+{"started_at": "2026-09-12T09:00:00-04:00", "pipeline_dir": "/opt/scenicplus",
+ "commit": "d34db33fcafed34db33fcafed34db33fcafed34d",
+ "branch": "BRANCH-FROM-THE-RECORD", "describe": "DESCRIBE-FROM-THE-RECORD",
+ "dirty_files": 0, "host": "node01", "python": "3.11.8", "user": "x",
+ "lsf_job": "12345"}
+JSN
+
+# Figures are written by R20, i.e. DURING the run -- so they must post-date the
+# marker, and the fixture has to say so explicitly because every PNG above was
+# created before it. Two are then backdated: nothing clears
+# `5.analysis/plots/`, so a figure R20 skipped this time (the t-SNE bails below
+# ten cells) survives from the run before under the same name, and the report
+# used to embed it under the expected heading and call it this run's.
+touch "$WS/5.analysis/plots"/*.png "$WS/5.analysis/plots"/*.pdf "$WS/QC"/*.png \
+      "$WS/QC"/*.pdf 2>/dev/null
+touch -t 202001010000 "$WS/5.analysis/plots/06_TF_target_count.png" \
+                      "$WS/5.analysis/plots/99_unexpected_extra.png"
 printf 'ran fine\n' > "$WS/logs/R01_seurat_export.log"
 : > "$WS/logs/R20_visualize.log"          # empty on purpose -- a REAL alarm
 # The report's own log, empty exactly as it is on a real run: `tee` creates it
@@ -271,6 +308,28 @@ has "...and the chromosome naming, the Ensembl/UCSC trap" "UCSC"
 has "unannotated peak chromosomes are named"      "chrM"
 hasnt "no '?' rows survive in the genome section" ">?<"
 
+# --- 3b. the code identity comes from the RUN, not from `git` at render time -
+has "the pipeline version is the one recorded at onstart" "DESCRIBE-FROM-THE-RECORD"
+has "...with the branch from the same record"             "BRANCH-FROM-THE-RECORD"
+has "...and the page says WHEN it was captured"           "captured when the run started"
+# The negative half. If the fallback ever runs here it would name this repo's
+# real branch, and the two could differ for one run without anyone noticing.
+hasnt "...and it did NOT fall back to a live git call"    "READ NOW"
+
+# --- 3c. a figure left over from an earlier run says so ----------------------
+# Counted, not grepped for presence: presence alone would pass if the label
+# were attached to EVERY figure, which is the other way to be useless.
+n_old="$(grep -o 'from an earlier run' "$OUT" | wc -l)"
+[[ "$n_old" == 2 ]] \
+    && say ok "exactly the 2 backdated figures are marked as carried over" \
+    || say FAIL "expected 2 carried-over figure labels, got $n_old"
+has "...the count is stated once, up front"       "2 of 6 figure(s) predate this run"
+has "...and the reason the directory holds them"  "Nothing clears"
+# The label must reach BOTH lists: the expected set and the leftovers. 06_ is in
+# FIGURE_ORDER and 99_ is not, and they take different code paths.
+hasnt "the 'Other figures' note no longer claims this run made them" \
+      "Produced by this run but not in the"
+
 # --- 4. the embed budget, in BOTH directions ---------------------------------
 has "a small PNG is embedded as a data URI"       "data:image/png;base64,"
 has "an oversized PNG is linked instead"          "Linked, not embedded"
@@ -313,6 +372,12 @@ if [[ $? -eq 0 && -s "$WORK/ws3/report.html" ]]; then
     [[ "$n" -ge 4 ]] \
         && say ok "an empty workspace renders and reports every section missing ($n)" \
         || say FAIL "an empty workspace rendered but only flagged $n missing section(s)"
+    # No logs/.run_meta.json here, so the version line falls back to a live git
+    # read -- which is allowed, but must SAY it is one. A plausible wrong answer
+    # stated confidently is the failure this whole design exists to avoid.
+    grep -qF "READ NOW" "$WORK/ws3/report.html" \
+        && say ok "with no onstart record the version line is LABELLED as read now" \
+        || say FAIL "the fallback version line does not admit it is a live read"
 else
     say FAIL "an empty workspace did not render at all"
 fi

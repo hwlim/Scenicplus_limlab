@@ -825,6 +825,104 @@
   - The plan's stated gate ("the runner is the only entry point") is
     deliberately NOT met. Deletion stays a one-line follow-up.
 
+20260912: review -- four ways the run record described the wrong run
+  - Found by reading the artifacts against what produced them, not by a gate.
+    All four are the same species of defect: the page or the bundle states
+    something confidently, and nothing it says is checkable from the page.
+  - **lsf_jobs.tsv was never scoped.** `scoped_logs()` took the marker and the
+    `lsf_accounting()` call two lines below it passed no `since` at all -- one
+    function, two call sites, one of them scoped, which is precisely the shape
+    `scoped_logs()`'s own docstring warns about. On any second run the table
+    carried every earlier run's rows; on the FAILED run the bundle exists for,
+    that is a previous SUCCESSFUL run's numbers presented as this one's. The
+    gate could not see it because case 4 checks `logs/*.log` and this is
+    `logs/lsf/*.out`, read by a different function.
+  - **A related ordering bug underneath it.** `lsf_accounting` iterated
+    `sorted(os.listdir(...))` and let the last write win, so
+    `R09_cistarget.11.out` lost to `R09_cistarget.9.out` -- lexicographic, and
+    the OLDER job wins once a counter passes 9. Now ordered by mtime. Scoping
+    hides this most of the time and does not fix it: a rule snakemake retried
+    inside one run has two files in scope.
+  - **The report read its own commit at render time.** R21 is the LAST rule, on
+    a compute node, hours in, against a shared install -- the exact hazard
+    `--mode start` was built for, described in that file's docstring, and the
+    report went and made the finish-time call anyway. So the bundle and the
+    report could name different commits for one run, and the report is what
+    people open. Now from `logs/.run_meta.json`, with a live read kept as a
+    fallback that LABELS itself as one.
+  - **Stale figures were labelled as this run's.** Nothing clears
+    `5.analysis/plots/`, and R20 legitimately skips figures -- the t-SNE bails
+    below ten cells. The previous run's PNG therefore survives under the same
+    name, and the report globbed the directory, embedded it under the expected
+    heading, and captioned the leftovers "Produced by this run". Now each
+    figure says whether this run wrote it. LABELLED, not dropped: after a
+    partial rerun every figure is carried over and every one is still right.
+  - **A deliberate refusal was not an error signature.** The scan matched
+    tracebacks and kill messages. A refusal -- R07 catching GRCm39-under-mm10,
+    step 08 catching non-intersecting barcodes -- prints a tidy explanation and
+    exits 1, tagged `[genome]` exactly like the progress line above it. So the
+    manifest for a real refusal said no log carried a signature and sent the
+    reader to look at scheduling. Fixed at BOTH ends: every refusal now carries
+    a `FATAL` marker (one `_fatal()` wrapper at each entry point, so a refusal
+    added later is covered without anyone remembering), and the scan also takes
+    the LSF epilogue's non-zero `Exited with exit code`. A tag alone could not
+    work -- the success path prints the same tag.
+  - **Gates, each proven able to fail first.** provenance.sh gained 4b, 4c and
+    the filename-agreement check; report_render.sh gained the code-identity and
+    carried-over-figure checks, counted rather than grepped for presence. Five
+    separate reverts, each turning exactly the intended check red: the missing
+    `since`, the old `_TRACE`, the render-time git read, the unscoped figures,
+    and a renamed constant. 8 of 8 local gates green afterwards.
+  - The four were reported by a review agent; three of its other findings are
+    documentation drift and are not fixed here.
+
+20260912: review -- documentation that contradicted the code
+  - Three findings, and all three were the same mistake: the documents kept
+    describing the BASH DRIVER while the workflow did something else. None of
+    them fails anything, which is why they survived I8's doc pass.
+  - **The "redraw in two minutes" recipe re-ran everything.** RUNBOOK section 5
+    said to set `input.reduction` and then `-f 20`, reasoning that no stage in
+    between reads a reduction. Three rules track the key -- R01 and R02 in
+    prepare.smk, R20 in report.smk -- and R01's declared OUTPUT set contains
+    `embedding_<name>.tsv`, so the name is part of what that rule promises. The
+    config edit re-runs R01 and the cascade takes all 21 rules, R04's 78
+    minutes and R09's 256 GB reservation included. The `-f 20` never got to be
+    the cheap path. Rewritten: `-f 20` redraws with the CURRENT reduction;
+    changing it is a full run, and worth deciding before the first one.
+  - **`-f N` is a rule, not a range.** It becomes `--forcerun R<NN>_*`, so
+    snakemake re-runs that rule and its DEPENDENTS. Four documents said "from
+    step N onward", which is the obsolete driver's semantics and correct THERE
+    -- it walks a line and compares numbers. Measured off the resolved DAG:
+    `-f 7` skips R09, `-f 9` skips R10 and R13, `-f 14` skips R15 and R17. The
+    conversion tables in quickstart.md and the driver's header presented the
+    two as equivalent, so a converted habit leaves a sibling stage untouched
+    and the run still ends green.
+  - **scenicplus_init.sh sent new users to the obsolete driver** -- the first
+    instruction anyone received, months after it was retired. Its `--help` also
+    had the same hardcoded `sed -n '2,15p'` range that I8 fixed in the runner,
+    and had already grown past it. Both fixed; help is now derived from the
+    comment block.
+  - **The README was still driver-era throughout**, which is worse than the
+    init script because it is the front door: "There is no snakemake", the
+    `results/`+`interim/` layout, `.cfgsha` resume, and a setup step telling
+    people to `conda env create -f environment.yml` -- a file whose own header
+    says the pipeline was never run-tested against it and which RUNBOOK section
+    1 says does not produce a working environment. CLAUDE.md said "There is no
+    snakemake anywhere" too. Both rewritten.
+  - **Gated, because prose is what rots.** dryrun.sh 7d derives the three fork
+    examples from the resolved DAG and checks every document's claim against
+    them, so a DAG change surfaces here instead of in a reader's wrong
+    expectation -- it already would have, since the R10 edge fix earlier today
+    changed R07's skip set from {R09, R10} to {R09}. 7e RUNS scenicplus_init.sh
+    and reads its output rather than grepping its source. Three controls: the
+    old wording, a wrong skip list, and the restored driver instruction, each
+    turning exactly its own check red.
+  - **Two defects of mine, both caught by the new gate on its first run.** The
+    skip-list extractor did `int(x[1:])` on a regex group that had already
+    captured the digits, so "R10" read as 0. And changing the runner's message
+    from "forcing from X onward" broke two existing assertions that quoted the
+    old wording -- the wording being wrong is why it was changed.
+
 Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
 2026-09-09; artifacts not inspected here). The PARAMETERS have never been
 examined: the topic-count sweep, the DAR thresholds and the search-space width

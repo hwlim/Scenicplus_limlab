@@ -269,9 +269,24 @@ kept, but is obsolete.
     scenicplus.run.sh -n                     # plan only, runs nothing
     scenicplus.run.sh -j 8                   # run here, on 8 cores
     scenicplus.run.sh --lsf -j 20            # one LSF job per rule, 20 at once
-    scenicplus.run.sh -f 9                   # force from step 9 (rule R09_*)
+    scenicplus.run.sh -f 9                   # force rule R09_* and its dependents
     scenicplus.run.sh -- --forceall          # everything
     scenicplus.run.sh -p                     # also print each shell command
+
+**`-f N` names a RULE, not a range.** It becomes `--forcerun R<NN>_*`, so
+snakemake re-runs that rule and everything that depends on it. The DAG forks,
+so that is not the same as "every step numbered N or higher":
+
+| you type | snakemake also skips | because |
+|---|---|---|
+| `-f 7` | R09 | cistarget reads only the region sets |
+| `-f 9` | R10, R13 | dem and region_to_gene are R09's siblings, not its children |
+| `-f 14` | R15, R17 | the extended eGRN and AUCell branch runs in parallel |
+
+The obsolete driver's `--from N` *did* mean every step numbered N or higher: it
+walks a line and compares numbers. Converting the habit straight across leaves
+a sibling stage untouched and the run still comes out green. To rebuild a
+particular stage, name that stage — `-f 10` is what re-runs dem.
 
 21 rules: `R01_*` through `R20_*` are the twenty steps, and `R21_report` builds
 `report.html`, which `rule all` targets — so a run is not finished until it is
@@ -388,22 +403,29 @@ What will NOT get faster by tuning: **steps 9 and 10** read the 32.8 GB and
 12.9 GB cisTarget feathers, and that I/O dominates them. They are also
 sentinel-cached, so the cost is paid once per workspace, not per re-run.
 
-**Redrawing the figures of a finished run costs one step.** Setting
-`input.reduction` changes the `.cfgsha` of steps 1, 2 and 20, and once step 1
-runs the cascade forces all twenty — which is the right default, but pointless
-here, since no stage between them reads a reduction. Step 20 reads the layout
-straight out of step 01's `seurat_export/embedding_<name>.tsv`, which a finished
-workspace already has for every reduction the object carried:
+**Redrawing the figures of a finished run costs one step:**
 
-    # set input.reduction first, then
     scenicplus.run.sh -f 20        # redraw the figures and the report
 
-Forcing R20 re-runs it and `R21_report` and nothing else, because nothing
-upstream changed — about two minutes. Check the new titles: each figure names
-the layout it was drawn on.
+Forcing R20 re-runs it and `R21_report` and nothing else — about two minutes.
+Each figure names the layout it was drawn on, so the titles say what changed.
 
-The obsolete equivalent is `scenicplus_run_pipeline.sh --only 20`, whose
-`--only` bypasses the cascade and so leaves no report rebuilt.
+**CHANGING `input.reduction` IS NOT THAT CHEAP, and this section used to claim
+it was.** The recipe read "set `input.reduction` first, then `-f 20`", on the
+reasoning that no stage in between reads a reduction. Three rules track the
+key — R01 and R02 in `rules/prepare.smk`, R20 in `rules/report.smk` — and R01's
+declared OUTPUT set contains `embedding_<name>.tsv`, so the name is part of what
+that rule promises to produce. Editing it re-runs R01, and the cascade takes all
+21 rules with it: R04's 78 minutes and R09's 256 GB reservation included. The
+`-f 20` in the old recipe never got the chance to be the cheap path, because the
+config edit above it had already scheduled everything.
+
+So: `-f 20` redraws with the reduction the workspace was built on. Choosing a
+different one is a full run, and worth deciding before the first one rather
+than after.
+
+The obsolete equivalent of the redraw is `scenicplus_run_pipeline.sh --only 20`,
+whose `--only` bypasses the cascade and so leaves no report rebuilt.
 
 **For a plumbing test rather than a result**, the combination that changes the
 least science per second saved is `n_topics: [10,20,30]` + `gsea_n_perm: 250` +

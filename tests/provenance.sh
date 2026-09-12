@@ -44,14 +44,18 @@ mk_ws() {                       # mk_ws <dir> <shell-body-for-the-rule>
     mkdir -p "$d/config" "$d/logs/lsf"
     printf 'Pipeline: "ScenicPlus"\ninput: {species: hsapiens}\n' \
         > "$d/config/config.yaml"
-    # An LSF epilogue, so lsf_jobs.tsv has something real to parse.
-    cat > "$d/logs/lsf/R09_cistarget.1.out" <<'LSF'
-Job was executed on host(s) <16*bmi-200m5-04>, in queue <normal>, as user <x>
-    Run time :                                   682 sec.
-    Max Memory :                                 152566 MB
-    Max Processes :                              28
-    Max Threads :                                1151
+    # A PREVIOUS run's LSF epilogue, backdated. `logs/lsf/` accumulates exactly
+    # like `logs/` does, so this is the normal state of a workspace, not an
+    # exotic one -- and the bundle used to copy every row of it into
+    # lsf_jobs.tsv as though it described the run that just ended.
+    cat > "$d/logs/lsf/R00_previous.1.out" <<'LSF'
+Job was executed on host(s) <16*OLD-RUN-NODE>, in queue <normal>, as user <x>
+    Run time :                                   99 sec.
+    Max Memory :                                 111 MB
+    Max Processes :                              1
+    Max Threads :                                1
 LSF
+    touch -t 202001010000 "$d/logs/lsf/R00_previous.1.out"
     mkdir -p "$d/QC"; printf '{"assembly_detected": "hg38"}\n' > "$d/QC/assembly.json"
     # A report to copy. Without one the bundle's report.html path is untested,
     # which is exactly how it shipped unchecked the first time.
@@ -77,6 +81,16 @@ def _provenance(mode, **kw):
         print("provenance", mode, "failed", e)
 onstart:
     _provenance("start")
+    # THIS run's LSF epilogue, written after the marker so its mtime lands
+    # inside the run -- which is what makes the scoping check below mean
+    # something. Writing it in mk_ws instead would backdate it before onstart
+    # and quietly test the opposite of what it says.
+    open("logs/lsf/R09_cistarget.1.out", "w").write(
+        "Job was executed on host(s) <16*bmi-200m5-04>, in queue <normal>, as user <x>\\n"
+        "    Run time :                                   682 sec.\\n"
+        "    Max Memory :                                 152566 MB\\n"
+        "    Max Processes :                              28\\n"
+        "    Max Threads :                                1151\\n")
 onsuccess:
     _provenance("finish", config=CONFIG_FILE, status="success", snakemake_log=log)
 onerror:
@@ -232,6 +246,74 @@ if [[ -n "$B5" ]]; then
         || say FAIL "scoping dropped this run's log too"
 fi
 
+# --- 4b. the LSF ACCOUNTING is scoped too, not only the logs -----------------
+# It was not, and the two halves disagreed in the same bundle: scoped_logs()
+# took the marker while the lsf_accounting() call beside it passed no `since`
+# at all. So on any second run the table carried every earlier run's rows --
+# including, on the FAILED run this bundle exists for, a previous SUCCESSFUL
+# run's numbers presented as this one's. Case 4 could not see it: it checks
+# `logs/*.log`, and this is `logs/lsf/*.out`, parsed by a different function.
+if [[ -n "$B" ]]; then
+    grep -q "OLD-RUN-NODE" "$B/lsf_jobs.tsv" \
+        && say FAIL "lsf_jobs.tsv carries a PREVIOUS run's job as this run's" \
+        || say "ok" "an LSF epilogue older than the marker is left out of lsf_jobs.tsv"
+    # Both directions. Without this, scoping everything away would also pass.
+    grep -q "bmi-200m5-04" "$B/lsf_jobs.tsv" \
+        && say "ok" "...while this run's own job is still in it" \
+        || say FAIL "scoping dropped this run's LSF accounting too"
+fi
+
+# --- 4c. a DELIBERATE REFUSAL is an error signature --------------------------
+# The bundle's whole job is the failed run. Its scan matched tracebacks and
+# kill messages, so a crash was found -- but a refusal, which is what this
+# pipeline does on purpose when the genome is wrong, prints a tidy explanation
+# and exits 1. The manifest then said "NO log carries an error signature ...
+# the failure may be in scheduling" and pointed away from the log holding the
+# answer. Both halves are checked, because a scan that matches everything is
+# not a scan: the ordinary progress line uses the SAME "[genome]" tag.
+#
+# The message comes from a FILE, not from an inlined `echo`. Snakemake formats
+# the shell string, so a double quote in the body terminates it and the
+# Snakefile dies at parse -- which reads as "the handler did not run" and has
+# cost this suite a debugging session before. `cat` keeps the body free of
+# quotes and of `[...]`, which bash would treat as a glob.
+WS5b="$WORK/refusal"
+mk_ws "$WS5b" 'cat refusal.txt; false'
+cat > "$WS5b/refusal.txt" <<'TXT'
+[genome] chromosome 1 = 248,956,422 bp, consistent with hg38
+[genome] FATAL: chromosome 1 is 195,154,279 bp, but mm10 is 195,471,971 bp.
+[genome]   Chromosome 1's length IS the assembly.
+TXT
+( cd "$WS5b" && snakemake -c1 >/dev/null 2>&1 )
+B5b="$(bundle_of "$WS5b" error)"
+if [[ -n "$B5b" && -f "$B5b/manifest.txt" ]]; then
+    grep -q "R99_thing.log" "$B5b/manifest.txt" \
+        && say "ok" "a refusal's log is named in the manifest as carrying a signature" \
+        || { say FAIL "a refusal produced a bundle that names no log"
+             grep -A3 "error signature" "$B5b/manifest.txt" | head -4; }
+    grep -q "may be in scheduling" "$B5b/manifest.txt" \
+        && say FAIL "the manifest still sends the reader to scheduling" \
+        || say "ok" "...and does NOT send the reader off to look at scheduling"
+else
+    say FAIL "the refusal case produced no error bundle"
+fi
+
+WS5c="$WORK/norefusal"
+mk_ws "$WS5c" 'cat progress.txt; touch out.txt'
+cat > "$WS5c/progress.txt" <<'TXT'
+[genome] chromosome 1 = 248,956,422 bp, consistent with hg38
+[genome] chromosome naming: UCSC in all three
+[viz] Plots written to: 5.analysis/plots
+[grn_stage] stage cistarget complete
+TXT
+( cd "$WS5c" && snakemake -c1 >/dev/null 2>&1 )
+B5c="$(bundle_of "$WS5c" success)"
+if [[ -n "$B5c" && -f "$B5c/manifest.txt" ]]; then
+    grep -q "error signature" "$B5c/manifest.txt" \
+        && say FAIL "ordinary tagged progress output was read as an error" \
+        || say "ok" "ordinary [genome]/[viz] progress output is NOT an error signature"
+fi
+
 # --- 5. the cap SKIPS rather than truncates ----------------------------------
 # A half log is a trap: the interesting part of a traceback is at the END.
 WS6="$WORK/cap"
@@ -304,6 +386,34 @@ PY
 else
     say "ok" "(real-Snakefile check skipped: SCENICPLUS_PATH unset)"
 fi
+
+# --- 8. the two files must spell the onstart artifacts the same --------------
+# `.run_started` and `.run_meta.json` are written by provenance.py and read by
+# the report -- the marker for scoping, the meta for the code identity. Each
+# file names them independently, so a rename in one place would leave the other
+# silently falling back: no scoping, or a live `git` call at render time. Both
+# fallbacks are DESIGNED to be quiet, which is exactly why the spelling needs a
+# check rather than a test that would notice.
+python3 - "$ROOT" <<'PY'
+import re, sys, os
+root = sys.argv[1]
+prov = open(os.path.join(root, "scripts", "scenicplus_provenance.py")).read()
+rep = open(os.path.join(root, "scripts", "scenicplus_09_report.py")).read()
+def lit(text, name):
+    m = re.search(rf'^{name} = "([^"]+)"', text, re.M)
+    return m.group(1) if m else None
+pairs = [("MARKER", "RUN_MARKER"), ("META", "RUN_META")]
+bad = []
+for a, b in pairs:
+    x, y = lit(prov, a), lit(rep, b)
+    if x is None or y is None or x != y:
+        bad.append(f"{a}={x!r} in provenance vs {b}={y!r} in the report")
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+PY
+[[ $? -eq 0 ]] \
+    && say "ok" "provenance.py and the report agree on the onstart filenames" \
+    || say FAIL "the two files disagree on .run_started / .run_meta.json"
 
 echo
 if [[ $FAIL -eq 0 ]]; then echo "all checks passed"; else echo "FAILED"; fi

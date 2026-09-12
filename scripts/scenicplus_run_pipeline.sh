@@ -25,7 +25,10 @@
 #
 # Equivalences, if you are converting a habit:
 #   scenicplus_run_pipeline.sh --dry-run   ->  scenicplus.run.sh -n
-#   scenicplus_run_pipeline.sh --from 7    ->  scenicplus.run.sh -f 7
+#   scenicplus_run_pipeline.sh --from 7    ->  scenicplus.run.sh -f 7  (NOT equal:
+#       --from 7 forces every step numbered >= 7, because this driver walks a
+#       line. -f 7 forces R07 and its DEPENDENTS, and the workflow forks -- so
+#       -f 9 leaves R10 and R13 alone. Name the stage you want to redo.)
 #   scenicplus_run_pipeline.sh --force     ->  scenicplus.run.sh -- --forceall
 #   scenicplus_run_workstation.sh          ->  scenicplus.run.sh -j <cores>
 #   scenicplus_run_lsf.sh                  ->  scenicplus.run.sh --lsf -j 20

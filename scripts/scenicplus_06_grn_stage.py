@@ -589,5 +589,28 @@ def _diagnose_barcodes(args, cfg) -> None:
               file=sys.stderr)
 
 
+def _fatal(main_fn):
+    """Run `main_fn`, marking a string-valued SystemExit as FATAL.
+
+    ONE PLACE, at the entry point, rather than at each `sys.exit("...")` --
+    so a refusal added later is covered without anyone remembering to.
+
+    WHY A MARKER AT ALL. The provenance bundle greps this script's log for an
+    error signature and had none for a deliberate refusal: it matched
+    tracebacks and kill messages, while a refusal prints a tidy explanation
+    tagged exactly like the progress lines beside it and exits 1. A bundle for
+    a real refusal therefore reported "NO log carries an error signature" and
+    pointed the reader at scheduling. Python writes a string SystemExit to
+    stderr verbatim, so prefixing the string is enough.
+    """
+    try:
+        rc = main_fn()
+    except SystemExit as e:
+        if isinstance(e.code, str) and not e.code.startswith("FATAL"):
+            raise SystemExit(f"FATAL: {e.code}") from None
+        raise
+    return rc
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_fatal(main))

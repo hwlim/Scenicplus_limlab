@@ -150,6 +150,28 @@ rule R09_cistarget:
         " 2>&1 | tee {log}"
 
 
+def _dem_annotation():
+    """R07's annotation, but only when the dem stage actually reads it.
+
+    THE ARGUMENT IS CONDITIONAL, SO THE EDGE IS TOO.
+    `scenicplus_06_grn_stage.py` appends `--genome_annotation` only under
+    `scenicplus.dem_balance_number_of_promoters` (shipped default: true), and an
+    argument nothing declares is an edge Snakemake cannot see. Undeclared, a
+    changed genome pair re-runs R07 -> R08 -> R13 and NOT R10, so the promoter
+    balancing stays computed against the old annotation while the search space
+    uses the new one -- no error, different motifs. Ordering was luck too: R07
+    finishes seconds after R01 only because R10 waits on R04's 78 minutes.
+
+    An empty list declares nothing, which is what the false setting should
+    have: a rule should not gain a rerun trigger for a file it never opens.
+    The header above says these dependencies are taken from each stage's
+    ARGUMENTS -- this one is, now.
+    """
+    if config.get("scenicplus", {}).get("dem_balance_number_of_promoters"):
+        return [grn_out("genome_annotation.tsv")]
+    return []
+
+
 rule R10_dem:
     """Motif enrichment by differential scoring. Reads the 12.9 GB score
     database. Independent of R09, so the two run together."""
@@ -157,6 +179,8 @@ rule R10_dem:
         region_sets=stage_path("cistopic", "region_sets"),
         db=config["input"]["dem_db"],
         motifs=config["input"]["motif_annotations"],
+        # Empty unless the balanced branch is on -- see _dem_annotation().
+        annotation=_dem_annotation(),
         script=GRN_STAGE,
     output:
         result=grn_out("dem_results.hdf5"),

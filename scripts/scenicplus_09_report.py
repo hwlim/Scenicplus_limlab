@@ -96,7 +96,8 @@ TABLES = [
 
 CSS = """
 :root{--fg:#1a1a1a;--mut:#666;--line:#ddd;--bg:#fff;--accent:#0b5d9e;
-      --warnbg:#fff8e1;--warnln:#e6c200;--okbg:#eef7ee;--okln:#8bc34a}
+      --warnbg:#fff8e1;--warnln:#e6c200;--okbg:#eef7ee;--okln:#8bc34a;
+      --badbg:#fdecea;--badln:#d32f2f}
 *{box-sizing:border-box}
 body{margin:0;font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",
      Roboto,Helvetica,Arial,sans-serif;color:var(--fg);background:var(--bg)}
@@ -120,6 +121,10 @@ figcaption{color:var(--mut);font-size:.88rem;margin-top:.4rem}
       padding:.6rem .8rem;margin:.5rem 0 1.2rem;font-size:.9rem}
 .ok{background:var(--okbg);border-left:4px solid var(--okln);
     padding:.6rem .8rem;margin:.5rem 0 1.2rem;font-size:.9rem}
+/* Louder than .miss on purpose: .miss says something is absent, .bad says
+   something present is WRONG and the numbers above it cannot be trusted. */
+.bad{background:var(--badbg);border-left:4px solid var(--badln);
+     padding:.6rem .8rem;margin:.5rem 0 1.2rem;font-size:.9rem}
 code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85rem}
 pre{background:#f6f6f6;border:1px solid var(--line);padding:.7rem;
     overflow-x:auto;max-height:26rem}
@@ -219,6 +224,10 @@ def run_git(repo, *args):
 
 # --- Scoping a workspace's logs to THIS run ----------------------------------
 RUN_MARKER = ".run_started"
+# Written by `scenicplus_provenance.py --mode start`, and named here so the two
+# files cannot drift on the spelling. Both are `onstart` output: the marker's
+# MTIME is the scope boundary, the meta file's CONTENTS are the code identity.
+RUN_META = ".run_meta.json"
 
 
 def run_started_mtime(logs_dir):
@@ -277,9 +286,16 @@ def lsf_accounting(lsf_dir, since=None):
     if not os.path.isdir(lsf_dir):
         return []
     per_rule = {}
-    for name in sorted(os.listdir(lsf_dir)):
-        if not name.endswith(".out"):
-            continue
+    # BY MTIME, not by name. One rule can have several files -- `{jobid}` is
+    # snakemake's per-run counter and restarts at 0 -- and the later dict write
+    # wins, so ordering decides which run's numbers survive. Lexicographically
+    # `R09_cistarget.11.out` sorts BEFORE `R09_cistarget.9.out`, so the older
+    # job won whenever a counter passed 9. Scoping by `since` hides this most of
+    # the time and does not fix it: a rule that snakemake retried within one run
+    # has two files inside the scope.
+    names = [n for n in os.listdir(lsf_dir) if n.endswith(".out")]
+    names.sort(key=lambda n: (os.path.getmtime(os.path.join(lsf_dir, n)), n))
+    for name in names:
         rule = name.split(".")[0]
         if not in_this_run(os.path.join(lsf_dir, name), since):
             continue
@@ -304,18 +320,54 @@ def fmt_hms(sec):
 
 
 # --- sections ----------------------------------------------------------------
+def code_identity(ws, repo):
+    """What code produced this run, and how sure the page can be of it.
+
+    FROM `logs/.run_meta.json`, WRITTEN AT ONSTART -- not from a `git` call
+    made here. This page renders in the LAST rule of the run, on a compute
+    node, up to hours after the run began. The install is shared, so somebody
+    checks out another branch mid-run and a rev-parse at this moment names a
+    commit that produced none of the outputs above it.
+
+    That is precisely the hazard `scenicplus_provenance.py --mode start` was
+    built to avoid, and its docstring says so; the report then went and made
+    the finish-time call anyway, so the bundle and the report could disagree
+    about one run -- and the report is the artifact people open.
+
+    Falls back to a live read, LABELLED as one. A wrong answer stated plainly
+    is recoverable; a wrong answer stated confidently is the whole problem.
+    """
+    meta_path = os.path.join(ws, "logs", RUN_META)
+    try:
+        with open(meta_path) as fh:
+            meta = json.load(fh)
+    except (OSError, ValueError):
+        meta = None
+    if meta:
+        desc = meta.get("describe") or meta.get("commit", "")[:12]
+        branch = meta.get("branch") or ""
+        txt = " ".join(x for x in (desc, f"({branch})" if branch else "") if x)
+        if meta.get("dirty_files"):
+            txt += f" — {meta['dirty_files']} uncommitted file(s) at start"
+        return (txt or "unknown", "captured when the run started")
+    live = run_git(repo, "describe", "--always", "--dirty", "--tags") \
+        or run_git(repo, "rev-parse", "--short", "HEAD")
+    branch = run_git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    txt = " ".join(x for x in (live, f"({branch})" if branch else "") if x)
+    return (txt or "not a git checkout",
+            "READ NOW, NOT AT START — no logs/.run_meta.json, so a "
+            "checkout during the run would make this name the wrong commit")
+
+
 def sec_run(cfg, cfg_path, ws, repo):
     inp = cfg.get("input", {}) or {}
-    desc = run_git(repo, "describe", "--always", "--dirty", "--tags")
-    head = run_git(repo, "rev-parse", "--short", "HEAD")
-    branch = run_git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    version, version_note = code_identity(ws, repo)
     rows = [
         ("Generated", dt.datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")),
         ("Workspace", os.path.abspath(ws)),
         ("Config", cfg_path),
         ("Pipeline", os.path.abspath(repo)),
-        ("Pipeline version", " ".join(x for x in (desc, f"({branch})" if branch else "") if x)
-         or head or "not a git checkout"),
+        ("Pipeline version", f"{version} — {version_note}"),
         ("Species", inp.get("species", "?")),
         ("Assembly (configured)", inp.get("assembly", "not set")),
         ("Cell-type column", inp.get("celltype_column", "?")),
@@ -342,6 +394,28 @@ def sec_run(cfg, cfg_path, ws, repo):
     return f"<h2 id=run>Run</h2><table><tbody>{body}</tbody></table>"
 
 
+def assembly_agrees(configured, detected):
+    """Does `input.assembly` name the same assembly `chr1_matches` does?
+
+    NOT `==`, and that is the whole point of this function existing. R07's
+    KNOWN_CHR1 maps a chromosome-1 length to every accepted spelling of the
+    assembly it belongs to, joined by "/" -- 248,956,422 bp is "hg38/GRCh38",
+    the UCSC name and the GRC name for one thing. A config saying "hg38" is
+    therefore never equal to the record and always a member of it.
+
+    That is not hypothetical: the equality version shipped, and on a real
+    report it made the Genome section fall through all three of its branches
+    and print no panel at all -- neither confirmation nor warning, which reads
+    exactly like a section that was never written.
+
+    Case-insensitive because the spellings are proper names, not identifiers.
+    """
+    if not configured or not detected:
+        return False
+    names = [n.strip().lower() for n in str(detected).split("/") if n.strip()]
+    return str(configured).strip().lower() in names
+
+
 def sec_assembly(path):
     h = "<h2 id=genome>Genome</h2>"
     if not os.path.exists(path):
@@ -361,6 +435,7 @@ def sec_assembly(path):
     # to. That last one IS the detected assembly.
     configured = rec.get("assembly")
     chr1, detected = rec.get("chr1_bp"), rec.get("chr1_matches")
+    agrees = assembly_agrees(configured, detected)
     rows = [
         ("Species", rec.get("species", "?")),
         ("Assembly (configured)", configured or "NOT SET"),
@@ -376,12 +451,13 @@ def sec_assembly(path):
     ]
     body = "".join(f"<tr><th>{esc(k)}</th><td>{esc(v)}</td></tr>" for k, v in rows)
     out = h + f"<table><tbody>{body}</tbody></table>"
-    # NOT a mismatch warning. R07 calls die() when chromosome 1's length
-    # disagrees with `input.assembly`, so a mismatched run never reaches this
-    # page -- a panel warning about it would be unreachable code pretending to
-    # be a safeguard. What IS worth saying is which of the two situations the
-    # reader is in, because they differ entirely.
-    if configured and detected and str(configured) == str(detected):
+    # FOUR situations, and the reader is in exactly one of them. An earlier
+    # version had three and compared the two names with `==`, which is why no
+    # panel rendered at all on a real report: the record's spelling is
+    # "hg38/GRCh38" and the config's is "hg38", so the equality was false, the
+    # two `not` branches were false, and the section fell through in silence.
+    # assembly_agrees() knows that a "/" separates SYNONYMS.
+    if agrees:
         out += (f'<div class="ok"><strong>Assembly confirmed.</strong> '
                 f'Chromosome 1 measures {chr1:,} bp, which is {esc(detected)}, '
                 f'matching <code>input.assembly</code>. R07 refuses the run when '
@@ -394,11 +470,28 @@ def sec_assembly(path):
                 'the GRCm39 problem \u2014 Ensembl serves GRCm39 for mouse, and '
                 'against mm10 data the coordinates are wrong while everything '
                 'still runs. Set it.</div>')
-    elif configured and not detected:
+    elif not detected:
+        # chr1 is None when the chromsizes carry no chromosome 1 at all; R07
+        # warns and continues, so this branch must not assume a number.
+        measured = (f'chromosome 1 measures {chr1:,} bp, which is not in the '
+                    f'reference table' if isinstance(chr1, int) else
+                    'the chromsizes carry no chromosome 1')
         out += (f'<div class="miss"><strong>Assembly unrecognised:</strong> '
-                f'chromosome 1 measures {chr1:,} bp, which is not in the '
-                f'reference table, so <code>{esc(configured)}</code> could not be '
+                f'{measured}, so <code>{esc(configured)}</code> could not be '
                 f'confirmed.</div>')
+    else:
+        # REACHABLE, despite R07's gate. R07 compares chr1 only for the
+        # assemblies in its own EXPECTED_CHR1 table (hg38 and mm10); for any
+        # other spelling it prints a note and continues. So `assembly: hg19`
+        # over hg38 data passes every check and arrives here disagreeing.
+        out += (f'<div class="bad"><strong>Assembly MISMATCH:</strong> '
+                f'<code>input.assembly</code> says {esc(configured)}, but '
+                f'chromosome 1 measures {chr1:,} bp, which is '
+                f'{esc(detected)}. R07 only gates the assemblies in its own '
+                f'reference table, so this pair reached the end of the run '
+                f'unchecked. Every peak-gene link here is built on '
+                f'coordinates from one assembly and an annotation from '
+                f'another.</div>')
     if unann:
         out += (f'<p class="note">{len(unann)} peak chromosome(s) absent from '
                 f'the annotation: {esc(", ".join(map(str, unann[:12])))}'
@@ -414,7 +507,7 @@ def sec_assembly(path):
     return out
 
 
-def sec_qc_figures(qc_dir, ws, max_bytes):
+def sec_qc_figures(qc_dir, ws, max_bytes, since=None):
     """Figures from QC/, which today means topic-model selection.
 
     A SEPARATE SECTION from Figures, because these describe how the run was
@@ -480,6 +573,13 @@ def sec_qc_figures(qc_dir, ws, max_bytes):
             cap.append(f'<a href="{esc(pdf)}">PDF</a>')
         if note:
             cap.append(note)
+        # R04 is the 78-minute step and is skipped on most reruns, so this
+        # figure is USUALLY carried over and that is correct. Saying so still
+        # matters: it is the evidence for the topic count, and a reader
+        # comparing two sweeps needs to know this one is not from this run.
+        stale = carried_over(full, since)
+        if stale:
+            cap.append(stale)
         out.append(f'<figure><img src="{src}" alt="{esc(f)}">'
                    f'<figcaption>{" &middot; ".join(cap)}</figcaption></figure>')
     return "\n".join(out)
@@ -506,13 +606,56 @@ def sec_tables(tsv_dir, head_rows):
     return "\n".join(out)
 
 
-def sec_figures(plots_dir, ws, max_bytes):
+def carried_over(full, since):
+    """A caption fragment when this file predates the run, else "".
+
+    NOTHING CLEARS `5.analysis/plots/`. R20 writes into it and removes nothing,
+    and it legitimately skips figures -- the t-SNE bails below ten cells, and
+    `input.celltype_scope` can leave that few. So the previous run's PNG stays
+    on disk under the same name, and the report globbed the directory, embedded
+    it under the expected heading, and called the leftovers "Produced by this
+    run". A reader then judges a parameter change against a picture of the run
+    before it.
+
+    A carried-over figure is NOT dropped. On a partial rerun -- `-f 21` to
+    redraw the report, say -- every figure is carried over and every one of
+    them is still the right picture. What was missing is the reader being told
+    which, so this labels rather than hides.
+    """
+    if since is None:
+        return ""
+    try:
+        if in_this_run(full, since):
+            return ""
+        when = dt.datetime.fromtimestamp(os.path.getmtime(full)).strftime("%m-%d %H:%M")
+    except OSError:
+        return ""
+    return (f'<strong>from an earlier run</strong> ({when}) — R20 did not '
+            f'write it this time')
+
+
+def sec_figures(plots_dir, ws, max_bytes, since=None):
     out = ["<h2 id=figures>Figures</h2>"]
     if not os.path.isdir(plots_dir):
         return "\n".join(out) + missing(plots_dir, "R20 produced no figures")
     pngs = sorted(f for f in os.listdir(plots_dir) if f.endswith(".png"))
     if not pngs:
         return "\n".join(out) + missing("any .png in " + plots_dir)
+    old = [f for f in pngs
+           if carried_over(os.path.join(plots_dir, f), since)]
+    if since is None:
+        out.append('<p class="note"><strong>Scope unknown.</strong> No '
+                   '<code>logs/.run_started</code> marker, so nothing here can '
+                   'be attributed to this run rather than an earlier one. '
+                   'Nothing clears this directory.</p>')
+    elif old:
+        out.append(f'<div class="miss"><strong>{len(old)} of {len(pngs)} '
+                   f'figure(s) predate this run</strong> and are marked below. '
+                   f'Nothing clears <code>5.analysis/plots/</code>, so a figure '
+                   f'R20 skipped this time — the t-SNE bails below ten '
+                   f'cells — is still on disk from last time under the '
+                   f'same name. Expected after a partial rerun; a surprise '
+                   f'otherwise.</div>')
     used = set()
     for prefix, title, blurb in FIGURE_ORDER:
         group = [f for f in pngs if f.startswith(prefix)]
@@ -535,21 +678,29 @@ def sec_figures(plots_dir, ws, max_bytes):
                 cap.append(f'<a href="{esc(pdf)}">PDF</a>')
             if note:
                 cap.append(note)
+            stale = carried_over(full, since)
+            if stale:
+                cap.append(stale)
             out.append(f'<figure><img src="{src}" alt="{esc(f)}">'
                        f'<figcaption>{" &middot; ".join(cap)}</figcaption>'
                        f"</figure>")
     extra = [f for f in pngs if f not in used]
     if extra:
         out.append("<h3>Other figures</h3>")
-        out.append('<p class="note">Produced by this run but not in the '
-                   'expected set. Listed rather than dropped.</p>')
+        out.append('<p class="note">Not in the expected set. Listed rather '
+                   'than dropped, and each says whether this run wrote it.</p>')
         for f in extra:
             full = os.path.join(plots_dir, f)
             rel = os.path.relpath(full, ws)
             src, note = embed_or_link(full, rel, max_bytes)
+            cap = [f"<code>{esc(rel)}</code>"]
+            if note:
+                cap.append(note)
+            stale = carried_over(full, since)
+            if stale:
+                cap.append(stale)
             out.append(f'<figure><img src="{src}" alt="{esc(f)}">'
-                       f'<figcaption><code>{esc(rel)}</code>'
-                       f'{" &middot; " + note if note else ""}</figcaption>'
+                       f'<figcaption>{" &middot; ".join(cap)}</figcaption>'
                        f"</figure>")
     return "\n".join(out)
 
@@ -696,9 +847,9 @@ def build(ws, cfg_path, repo, head_rows, max_bytes, self_log=None):
     parts = [
         sec_run(cfg, cfg_path, ws, repo),
         sec_assembly(j("QC", "assembly.json")),
-        sec_qc_figures(j("QC"), ws, max_bytes),
+        sec_qc_figures(j("QC"), ws, max_bytes, since=_since),
         sec_tables(j("5.analysis", "tsv"), head_rows),
-        sec_figures(j("5.analysis", "plots"), ws, max_bytes),
+        sec_figures(j("5.analysis", "plots"), ws, max_bytes, since=_since),
         sec_compute(j("logs", "lsf"),
                     os.path.splitext(os.path.basename(self_log))[0]
                     if self_log else None,
