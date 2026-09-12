@@ -66,6 +66,12 @@ FIGURE_ORDER = [
     ("06_", "Targets per TF", ""),
     ("07_", "TF importance distribution", ""),
     ("08_", "eGRN network", "Top TFs by eRegulon count."),
+    ("09_", "Target-region overlap, direct",
+     "How much do these regulons actually differ? Two eRegulons sharing most "
+     "of their regions are one finding reported twice -- co-binding TFs, or a "
+     "motif matched by a family. The block structure is the read; the matrix "
+     "is in the .tsv beside the figure."),
+    ("10_", "Target-region overlap, extended", ""),
 ]
 
 # Tables R19 declares. Everything else it writes is gated upstream and may

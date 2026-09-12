@@ -649,6 +649,35 @@
     the region-overlap heatmap (`jaccard_heatmap` exists but takes the LEGACY
     SCENICPLUS class, not MuData -- build it from R19's region lists instead).
 
+20260912: candidate 2 -- eRegulon target-region overlap
+  - `09_region_overlap_direct` / `10_region_overlap_extended`, each with its
+    Jaccard matrix as a .tsv beside it, both placed in the report. Answers how
+    much the regulons actually DIFFER: two sharing most of their regions are one
+    finding reported twice, and the triplet tables cannot show that.
+  - **Built here rather than called.** `jaccard_heatmap` exists but takes the
+    LEGACY SCENICPLUS class, not MuData. Constructing a legacy object to reach
+    one plotting function would put a second representation of the run in the
+    codebase forever, for a groupby and a pairwise loop.
+  - **Three defects, all found by OPENING the output or by a gate, none by
+    writing the code.** (1) The title collided with the colourbar and its
+    rotated label ran through the dendrogram -- invisible in source. (2) The TSV
+    first went into `5.analysis/tsv/`, which is R19's directory; two rules
+    owning one directory is the stated ownership invariant. (3)
+    `output_names.py` failed, and the reason was a hole in THAT gate: it only
+    saw stems passed literally to `save()`, so it caught the `else` branch of
+    the new ternary and missed the `if` branch, reporting one of two new figures
+    while looking green about the other. Now scans for the `NN_` convention
+    however the name is assembled.
+  - Gated by `tests/region_overlap.py` (21 checks) against HAND-WORKED Jaccard
+    values -- 1/3, 1, 0 -- because a heatmap of the wrong matrix is still a
+    plausible heatmap and looking at it would reveal nothing. Breaking the
+    denominator turns it red. Three degenerate cases must skip and write
+    nothing.
+  - Writing the schema's acceptance case caught it landing AFTER the suite's
+    summary line: it ran, printed `ok`, and could not fail anything. Moved, then
+    proved counted by tightening the schema until it went red.
+  - `overlap_top_n` is `minimum: 2`: a pairwise overlap needs two things.
+
 Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
 2026-09-09; artifacts not inspected here). The PARAMETERS have never been
 examined: the topic-count sweep, the DAR thresholds and the search-space width

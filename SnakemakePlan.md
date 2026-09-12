@@ -968,6 +968,71 @@ than triggering on its own.
 
 ---
 
+### eRegulon target-region overlap, 2026-09-12
+
+Second of the three Fig 2 candidates. `09_region_overlap_direct` and
+`10_region_overlap_extended` in `5.analysis/plots/`, each with its Jaccard
+matrix as a `.tsv` beside it, both placed in the report.
+
+What it answers: how much do these regulons actually DIFFER? Two eRegulons
+sharing most of their regions are one finding reported twice — co-binding TFs,
+or a motif matched by a family. The eRegulon tables cannot show it, because each
+row is a triplet and the redundancy only appears when the sets are compared.
+
+**Built here rather than called.** `scenicplus.plotting.correlation_plot` ships
+`jaccard_heatmap`, but it takes the LEGACY `SCENICPLUS` class while this pipeline
+produces MuData — which is why `heatmap_dotplot` is called with `scplus_mudata=`.
+Constructing a legacy object to reach one plotting function would put a second
+representation of the run in the codebase, to be kept in step forever, for what
+is a groupby and a pairwise loop over data the rule already reads.
+
+**Top-N by region count, `visualization.overlap_top_n` (default 40), and the
+figure states the cut.** The matrix is quadratic and all eRegulons can be several
+hundred. Ranking by set size keeps the regulons with something to overlap.
+
+**Three things came out of opening the output, not from writing it.**
+
+1. The first render had the title colliding with the colourbar and the
+   colourbar's rotated label running through the row dendrogram. Invisible in
+   the code, obvious in the PNG. Colourbar moved to the bottom-left gutter;
+   title moved onto the heatmap axes so it does not drift with figsize, which
+   here scales with the eRegulon count.
+2. The TSV was first written to `5.analysis/tsv/` — **R19's output directory**.
+   Two rules writing one directory is the ownership problem stated as an
+   invariant in the sibling repo, and snakemake would not know. It sits beside
+   its figure instead; a `.tsv` in `plots/` reads oddly and is correct.
+3. `output_names.py` failed, and inspecting WHY exposed a hole in that gate
+   rather than in the new code. It only saw stems passed as literals to
+   `save()`, so a name reaching it through a variable was invisible — it caught
+   the `else` branch of the new ternary by accident and missed the `if` branch
+   entirely, reporting one of two new figures while looking green about the
+   other. It now scans for the project's `NN_` figure-naming convention however
+   the name is assembled, which over-collects rather than under-collects.
+
+**Gated by `tests/region_overlap.py`, 21 checks.** Unlike the model-selection
+gate this one does NOT need to drive somebody else's plotting code, so a
+constructed frame with hand-worked overlaps is the stronger evidence: the three
+Jaccard values (1/3 for half-overlapping, 1 for identical, 0 for disjoint) are
+known independently of the implementation. A heatmap of the wrong matrix is
+still a plausible heatmap — every cell in [0,1], clean diagonal, believable
+blocks — so nothing about looking at it would reveal a transposed index or the
+wrong denominator. Breaking the denominator turns it red. The three degenerate
+cases (empty frame, no Region column, a single eRegulon) must skip and write
+NOTHING, since an empty figure is worse than an absent one.
+
+Both figures are deliberately UNDECLARED as rule outputs and recorded in
+`output_names.py`'s exemption list with the reason: a run with one eRegulon, or
+none carrying regions, legitimately produces neither. Same argument as
+`03_rss_per_celltype`.
+
+**Schema:** `overlap_top_n` is `minimum: 2`, not 1 — a pairwise overlap needs two
+things to compare, and the schema should refuse one at parse rather than leave it
+to a runtime skip. Three rejection cases and one acceptance. Writing the
+acceptance also caught it landing AFTER the suite's summary line, where it ran,
+printed `ok`, and could not fail anything.
+
+---
+
 ## Traps to carry across, not rediscover
 
 Each of these cost a real run in one repo or the other:

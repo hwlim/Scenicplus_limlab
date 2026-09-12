@@ -186,6 +186,11 @@ properties:
       top_n_eRegulons_per_celltype: {type: integer, minimum: 1}
       network_top_n_TFs: {type: integer, minimum: 1}
       network_top_n_targets_per_TF: {type: integer, minimum: 1}
+      # How many eRegulons enter the region-overlap heatmap, ranked by
+      # target-region count. The matrix is QUADRATIC in this, and all
+      # eRegulons can be several hundred -- unreadable, and slow to build.
+      # The figure states the cut it made.
+      overlap_top_n: {type: integer, minimum: 2}
 
   # report.html (R21). Both keys shape the PAGE, not the science -- nothing here
   # changes a number the pipeline computes, which is why the report rule can

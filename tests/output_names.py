@@ -38,8 +38,19 @@ viz = (ROOT / "scripts" / "scenicplus_08_visualize.py").read_text()
 written_stems = set()
 for m in re.finditer(r'save\(\s*fig,\s*out_dir,\s*f?"([^"]+)"', viz):
     written_stems.add(m.group(1))
-# also the `X if cond else Y` form, whose second branch the regex above misses
-for m in re.finditer(r'else\s+f?"([0-9]{2}_[^"]+)"', viz):
+
+# EVERY `NN_...` STRING IN THE SCRIPT, not just the ones passed to save()
+# literally. The two patterns above only saw a stem written inline at the call,
+# so a figure whose name reaches `save()` through a VARIABLE was invisible --
+# and the region-overlap pair proved it: the `else` branch of its ternary was
+# caught by an earlier hand-added regex while the `if` branch was not, so the
+# gate reported one of two new figures and looked green about the other.
+#
+# The project names every figure `NN_<something>`, so scanning for that
+# convention finds them however they are assembled. It can OVER-collect -- a
+# name in a comment counts -- and that is the safe direction: over-collecting
+# makes this ask a question, under-collecting makes it miss one silently.
+for m in re.finditer(r'"([0-9]{2}_[A-Za-z0-9_{}\'().\- ]*)"', viz):
     written_stems.add(m.group(1))
 
 literal = {s for s in written_stems if "{" not in s}
@@ -70,10 +81,16 @@ for stem in sorted(declared):
         f"script writes: {sorted(literal)} + patterns {sorted(patterns)}")
 
 # --- the other direction: a literal the script always writes, undeclared ----
-# Only a WARNING, because two are deliberately undeclared and the file says why:
-# 02_* has data-dependent names, 03_rss_per_celltype sits in a try/except that
-# prints and continues, so declaring it would turn a warning into a failed run.
-EXPECTED_UNDECLARED = {"03_rss_per_celltype"}
+# Deliberately undeclared, and each for a reason the source states:
+#   02_*  data-dependent names, unknowable at DAG-build time
+#   03_   inside a try/except that prints and continues, so declaring it would
+#         turn a warning into a failed run
+#   09_/10_  region overlap needs at least TWO eRegulons with regions to
+#         compare; a run with one, or with no region metadata, legitimately
+#         produces neither. Same argument as 03_.
+EXPECTED_UNDECLARED = {"03_rss_per_celltype",
+                       "09_region_overlap_direct",
+                       "10_region_overlap_extended"}
 undeclared = literal - {s.split("{")[0] for s in declared} - declared
 surprise = undeclared - EXPECTED_UNDECLARED
 say(not surprise,
