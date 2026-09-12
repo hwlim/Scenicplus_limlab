@@ -273,6 +273,39 @@ kept, but is obsolete.
     scenicplus.run.sh -- --forceall          # everything
     scenicplus.run.sh -p                     # also print each shell command
 
+### `--lsf` submits the RULES. It does not submit the runner.
+
+`scenicplus.run.sh --lsf` starts snakemake **in the shell you typed it in**, and
+snakemake issues one `bsub` per rule from there. That process has to live for
+the whole run: it is the only thing polling LSF, seeing a rule finish and
+submitting what comes next.
+
+**Lose the shell and the run stops halfway with no error.** An ssh drop, a
+login-node reboot, a sleeping laptop, an admin clearing long-running processes
+— any of these leaves the already-queued jobs to finish while nothing schedules
+the rest. Nothing fails, so nothing says so. You find out by noticing
+`report.html` never appeared.
+
+So on the cluster, give the orchestrator its own job:
+
+    cp $SCENICPLUS_PATH/scripts/scenicplus.bsub.sh .
+    $EDITOR scenicplus.bsub.sh        # conda prefix, pipeline dir, RUN_ARGS
+    bsub < scenicplus.bsub.sh         # `<` — the directives are read from stdin
+
+That wrapper is a small job (2 cores, 16 GB) whose only work is polling; the
+real reservations belong to the rules it submits. **Its `-W` must cover the
+whole pipeline including queue waits**, not the longest single rule — about two
+hours of compute for all 21 rules (section 5), so the template asks for five.
+An orchestrator that hits its own runlimit produces the same silent halt.
+
+`tmux`, `screen` or `nohup` on a login node solve the same problem and are fine
+for a short run or a dry run. `bsub -Is` does not: an interactive job dies with
+the terminal like any other shell.
+
+One orchestrator per workspace. Snakemake locks `.snakemake/`, so a second one
+refuses — but only after it has queued and started, so check
+`bjobs -J scenicplus_snake` first.
+
 **`-f N` names a RULE, not a range.** It becomes `--forcerun R<NN>_*`, so
 snakemake re-runs that rule and everything that depends on it. The DAG forks,
 so that is not the same as "every step numbered N or higher":

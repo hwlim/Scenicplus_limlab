@@ -45,15 +45,20 @@ $SCENICPLUS_PATH/                          # central pipeline (set by the user)
 ├── tests/                                 # local gates; none needs a cluster
 └── scripts/                               # all executables ($PATH)
     ├── scenicplus.run.sh                  # THE ENTRY POINT
+    ├── scenicplus.bsub.sh                 # template: run the ENTRY POINT as an
+    │                                      #   LSF job, so a dropped shell cannot
+    │                                      #   halt the run. Copy and edit.
     ├── scenicplus_init.sh                 # bootstrap a new analysis directory
     ├── scenicplus_check.sh                # preflight: required Python + R packages
     ├── scenicplus_genome_prepare.py       # R07: validates the genome pair
+    ├── scenicplus_make_genome_files.R     # builds an annotation/chromsizes pair
     ├── scenicplus_09_report.py            # R21: builds report.html
     ├── scenicplus_provenance.py           # onstart/onsuccess/onerror bundles
     ├── scenicplus_helper.py               # YAML-slice + sha256 helper (driver-era)
     ├── scenicplus_run_pipeline.sh         # OBSOLETE 20-step driver, kept
     ├── scenicplus_run_workstation.sh      # OBSOLETE thin wrapper
     ├── scenicplus_run_lsf.sh              # OBSOLETE bsub wrapper
+    ├── scenicplus_run_lsf_cchmc.sh        # OBSOLETE bsub wrapper, CCHMC modules
     ├── scenicplus_01_seurat_to_anndata.R  # step scripts (called by the rules
     ├── scenicplus_02_build_anndata.py     #  — not invoked by users)
     ├── scenicplus_03_create_cistopic.py
@@ -168,13 +173,28 @@ scenicplus.run.sh -n
 # 5a. Workstation
 SCENICPLUS_ENV=scenicplus_limlab scenicplus.run.sh -j 8
 
-# 5b. LSF — one job per rule, at most 20 in flight
+# 5b. LSF — one job per RULE, at most 20 in flight
 SCENICPLUS_ENV=scenicplus_limlab scenicplus.run.sh --lsf -j 20
 ```
 
 `scenicplus.run.sh` runs from the **current working directory** (your analysis
 dir) and reads `./config/config.yaml`. It runs the preflight first, then hands
 off to snakemake; anything after `--` goes straight to snakemake.
+
+**`--lsf` submits the rules, not the runner.** Snakemake stays in the shell you
+started it in and issues one `bsub` per rule from there, so that process is the
+only thing polling LSF and scheduling what comes next. Lose the shell and the
+queued jobs finish while nothing starts the rest — the run does not fail, it
+stops halfway in silence. For a real run, give the orchestrator its own job:
+
+```bash
+cp $SCENICPLUS_PATH/scripts/scenicplus.bsub.sh .
+$EDITOR scenicplus.bsub.sh        # conda prefix, pipeline dir, RUN_ARGS
+bsub < scenicplus.bsub.sh         # `<` — LSF reads #BSUB from stdin
+```
+
+RUNBOOK section 4 covers the walltime that wrapper needs and why `tmux` is
+enough for a dry run but not for an unattended one.
 
 A run ends with `report.html`. Open that first.
 

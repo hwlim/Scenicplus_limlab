@@ -7,8 +7,21 @@
 #
 #   scenicplus.run.sh -n                # dry run: print the plan, do nothing
 #   scenicplus.run.sh -j 8              # run locally on 8 cores
-#   scenicplus.run.sh --lsf             # submit each rule via profiles/lsf
+#   scenicplus.run.sh --lsf             # submit each RULE via profiles/lsf
 #   scenicplus.run.sh --lsf -j 20       # ... at most 20 cluster jobs at once
+#
+# `--lsf` DOES NOT SUBMIT THIS SCRIPT. It runs snakemake right here, in your
+# shell, and snakemake bsubs one job per rule from there. This process must
+# survive the whole run: it is the only thing polling LSF, noticing a rule
+# finish and submitting the next one. Lose the shell -- ssh drops, the login
+# node reboots, the laptop sleeps -- and the queued jobs finish while nothing
+# schedules what follows. The run does not fail; it stops halfway, with no
+# error anywhere to say so.
+#
+# For anything longer than a coffee, put the orchestrator in its own small
+# batch job: copy scripts/scenicplus.bsub.sh, edit the block at its top, and
+# `bsub < scenicplus.bsub.sh`. tmux/screen/nohup on a login node solve the same
+# problem and are fine for a short run.
 #   scenicplus.run.sh -p                # also print each shell command
 #   scenicplus.run.sh -f 7              # force rule R07_* and its DEPENDENTS
 #   scenicplus.run.sh -- --forceall     # anything after -- goes to snakemake

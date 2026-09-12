@@ -34,7 +34,7 @@ when yours has no cell-type labels yet.
 |---|---|---|
 | A. environment | install once, on a compute node | install once |
 | B. reference data | already on `/data/limlab`, nothing to download | download 45.7 GB yourself |
-| F. running | `scenicplus.run.sh --lsf`, through a small `run.sh` | `scenicplus.run.sh -j <cores>` |
+| F. running | `bsub < scenicplus.bsub.sh`, which runs `scenicplus.run.sh --lsf` | `scenicplus.run.sh -j <cores>` |
 | what to expect | the tested path | steps 1 to 3 are comfortable; steps 9 onward need the 45.7 GB of databases and far more memory than a laptop has |
 
 **This has run end to end at CCHMC and nowhere else.** The environment recipe
@@ -155,14 +155,29 @@ RUNBOOK section 4.
 
     scenicplus.run.sh -j 8                     # runs here, on 8 cores
 
-**On the CCHMC HPC**, `--lsf` submits each rule as its own job, sized from a
+**On the CCHMC HPC**, `--lsf` submits each RULE as its own job, sized from a
 measurement rather than from the heaviest step:
 
     scenicplus.run.sh --lsf -j 20              # at most 20 cluster jobs at once
 
-Keep the invocation in a small `run.sh` in the analysis directory rather than in
-shell history. That puts the settings a run used beside that run's outputs, and
-makes a re-run one command. A skeleton to adapt:
+**It does not submit itself.** Snakemake runs in the shell you typed that in and
+issues the `bsub` calls from there, so that process is the only thing polling
+LSF and scheduling the next rule. If the shell goes away — ssh drops, the login
+node reboots, the laptop sleeps — the queued jobs finish and nothing starts what
+follows. The run does not fail. It stops halfway and says nothing.
+
+So put the orchestrator in its own small batch job:
+
+    cp $SCENICPLUS_PATH/scripts/scenicplus.bsub.sh .
+    $EDITOR scenicplus.bsub.sh        # conda prefix, pipeline dir, RUN_ARGS
+    bsub < scenicplus.bsub.sh
+
+Note the `<`. `bsub < file` feeds the script on stdin so LSF reads its `#BSUB`
+directives; `bsub file` would run it as a command and ignore all of them.
+
+That wrapper also keeps the settings a run used beside that run's outputs, and
+makes a re-run one edit and one command. For a dry run or a quick redraw,
+running in a `tmux`/`screen` session is enough:
 
 ```bash
 #!/usr/bin/env bash
@@ -179,7 +194,8 @@ export PYTHONNOUSERSITE=1
 scenicplus.run.sh --lsf -j 20 "$@"          # -n, -f 7, -- --forceall, ...
 ```
 
-Then `./run.sh` submits, and `./run.sh -f 7` forwards the flag.
+`./run.sh` then starts the orchestrator here, and `./run.sh -f 7` forwards the
+flag — but read the paragraph above before leaving it unattended.
 
 **You no longer set the reproducibility variables yourself.** The workflow pins
 `PYTHONHASHSEED` and the four `*_NUM_THREADS` for every rule, deriving the
@@ -216,7 +232,7 @@ provenance bundle. Converting a habit:
 | `--from 7` | `-f 7` — **close, not equal**, see below |
 | `--force` | `-- --forceall` |
 | `scenicplus_run_workstation.sh` | `scenicplus.run.sh -j <cores>` |
-| `scenicplus_run_lsf.sh` | `scenicplus.run.sh --lsf -j 20` |
+| `scenicplus_run_lsf.sh` | `bsub < scenicplus.bsub.sh` — **not** a bare `scenicplus.run.sh --lsf`, see below |
 
 **The one row that is not a straight swap is `--from`.** The driver walks a
 line, so `--from 7` means every step numbered 7 or higher. `-f 7` becomes

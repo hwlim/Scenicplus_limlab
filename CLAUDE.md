@@ -69,6 +69,12 @@ list = use every cell.
   atomically renamed so a crash never leaves a half-written file that looks
   fresh.
 - CLI: `scenicplus.run.sh [-n] [-j N] [--lsf] [-p] [-f N] [-- <snakemake args>]`.
+  **`--lsf` submits the RULES, not the runner.** Snakemake stays in the calling
+  shell and issues one `bsub` per rule; that process is the only thing polling
+  LSF and scheduling the next rule, so losing the shell halts the run halfway
+  with no error. `scripts/scenicplus.bsub.sh` is a template that puts the
+  orchestrator in its own small LSF job (`bsub < scenicplus.bsub.sh`); its `-W`
+  must cover the whole pipeline plus queue waits, not the longest rule.
   **`-f N` selects a RULE and its dependents, not a range of steps** — the DAG
   forks, so `-f 9` leaves R10 and R13 alone. The obsolete driver's `--from N`
   did mean every step numbered N or higher; the two are not equivalent.
