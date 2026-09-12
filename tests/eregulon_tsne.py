@@ -29,6 +29,7 @@ one that ignores the seed passes nothing but would still look fine in a figure.
 """
 import importlib.util
 import os
+import re
 import sys
 
 os.environ.setdefault("MPLCONFIGDIR", os.environ.get("TMPDIR", "/tmp") + "/mpl")
@@ -76,7 +77,13 @@ for t in range(3):
     types += [f"celltype_{t}"] * N_PER
 X = np.vstack(blocks)
 cells = [f"c{i}" for i in range(X.shape[0])]
-obs = pd.DataFrame({"cell_type": types}, index=cells)
+# THE PREFIXED NAME IS THE REAL SHAPE. MuData prefixes obs columns with the
+# modality, so a config `cell_type` is `scRNA_counts:cell_type` on the object.
+# The first version of this fixture used the bare name -- a shape that does not
+# occur -- so the function passed while the CALL SITE in main() was passing the
+# unprefixed config value and skipping both figures on the real run.
+CT_COL = "scRNA_counts:cell_type"
+obs = pd.DataFrame({CT_COL: types}, index=cells)
 
 
 def make_md(with_region=True):
@@ -102,8 +109,8 @@ def png_bytes(p):
 # --- 1. it renders, per feature space, into its own file ---------------------
 out = WORK / "a"
 plt.close("all")
-step.eregulon_tsne(MD, "cell_type", out, "gene", 555)
-step.eregulon_tsne(MD, "cell_type", out, "region", 555)
+step.eregulon_tsne(MD, CT_COL, out, "gene", 555)
+step.eregulon_tsne(MD, CT_COL, out, "region", 555)
 names = sorted(p.name for p in out.iterdir())
 ok("gene and region write DIFFERENT stems, in both formats",
    names == ["11_tsne_eRegulon_gene_based.pdf", "11_tsne_eRegulon_gene_based.png",
@@ -114,7 +121,7 @@ ok("no figure is left open", plt.get_fignums() == [], f"{plt.get_fignums()}")
 # --- 2. THE SEED PAIR --------------------------------------------------------
 out_same = WORK / "same"
 plt.close("all")
-step.eregulon_tsne(MD, "cell_type", out_same, "gene", 555)
+step.eregulon_tsne(MD, CT_COL, out_same, "gene", 555)
 a1 = png_bytes(out / "11_tsne_eRegulon_gene_based.png")
 a2 = png_bytes(out_same / "11_tsne_eRegulon_gene_based.png")
 ok("the SAME seed gives a byte-identical figure", a1 == a2,
@@ -122,7 +129,7 @@ ok("the SAME seed gives a byte-identical figure", a1 == a2,
 
 out_diff = WORK / "diff"
 plt.close("all")
-step.eregulon_tsne(MD, "cell_type", out_diff, "gene", 999)
+step.eregulon_tsne(MD, CT_COL, out_diff, "gene", 999)
 a3 = png_bytes(out_diff / "11_tsne_eRegulon_gene_based.png")
 ok("a DIFFERENT seed gives a different figure, so the seed is not ignored",
    a1 != a3, "identical output for seeds 555 and 999")
@@ -137,7 +144,7 @@ try:
     tiny.obs = tiny_obs
     out_t = WORK / "tiny"
     plt.close("all")
-    step.eregulon_tsne(tiny, "cell_type", out_t, "gene", 555)
+    step.eregulon_tsne(tiny, CT_COL, out_t, "gene", 555)
     made = (out_t / "11_tsne_eRegulon_gene_based.png").exists()
     ok("12 cells still renders -- perplexity clamped below n_samples", made)
 except Exception as e:
@@ -151,7 +158,7 @@ for label, md, why in (
         ("a missing cell-type column", MD, "cannot colour it")):
     d = WORK / label.replace(" ", "_").replace("-", "_")
     plt.close("all")
-    col = "cell_type" if "no AUC" in label else "not_a_column"
+    col = CT_COL if "no AUC" in label else "not_a_column"
     try:
         step.eregulon_tsne(md, col, d, "gene", 555)
         crashed = False
@@ -160,6 +167,22 @@ for label, md, why in (
     ok(f"{label} skips cleanly ({why})", crashed is False, str(crashed))
     ok(f"...and writes nothing for {label}",
        not (d / "11_tsne_eRegulon_gene_based.png").exists())
+
+# --- 4b. THE CALL SITE passes the RESOLVED column, not the config value ------
+# The bug this gate missed on its first outing, and it could not have been
+# caught by calling the function: the defect was in main(), which passed
+# `celltype_col` straight from the config while MuData had prefixed it. Every
+# other consumer in that file already used the resolved `rss_var`. So check the
+# call site as TEXT -- the same approach output_names.py takes for a mismatch
+# that only shows up on the cluster.
+viz = open(STEP).read()
+# The lookbehind excludes the DEFINITION line, whose own parameter is named
+# `ct_col` -- without it the check reports the signature as a caller.
+calls = re.findall(r"(?<!def )eregulon_tsne\(\s*md,\s*([A-Za-z_][\w]*)", viz)
+ok("main() calls eregulon_tsne with the RESOLVED column",
+   calls and set(calls) == {"rss_var"},
+   f"called with {sorted(set(calls))}; must be rss_var, since MuData prefixes "
+   f"obs columns with the modality")
 
 # --- 5. the caption says it is a DIFFERENT layout ----------------------------
 # Every other figure in the report is drawn on the Seurat reduction. A reader

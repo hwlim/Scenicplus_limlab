@@ -1093,6 +1093,88 @@ report for something interactive.
 
 ---
 
+### THE RUN HAPPENED, 2026-09-12 — I5, I6 and I7 are cluster-validated
+
+Full run on the PBMC arc fixture at `5d01b36`, 21 rules, ~108 minutes of summed
+job time across six nodes. `celltype_column: wsnn_res.0.3`, reduction
+`wnn.umap`.
+
+**I5 HOLDS. Nothing exceeded its reservation, nothing was killed, nothing
+pended** — including the 256,000 MB `R09_cistarget` request, which was the one
+unchecked assumption in the whole increment. It scheduled on `rit-r660-05`. And
+this really was the new code: R21's epilogue reads `Total Requested Memory:
+4000.00 MB`, matching its `4g` tier, which is the check that caught the previous
+run as pre-I5.
+
+| rule | reserved | used | headroom |
+|---|---|---|---|
+| R09_cistarget | 256,000 | 133,734 | 1.9x |
+| R10_dem | 192,000 | 66,311 | 2.9x |
+| R05_region_sets | 128,000 | 34,770 | 3.7x |
+| R15_egrn_extended | 128,000 | 33,561 | 3.8x |
+| R04_topic_modeling | 96,000 | 23,469 | 4.1x |
+
+cistarget came in at 134 GB, not the 153 GB the 2026-09-09 measurement showed —
+so 1.9x is the tightest margin in the pipeline, on the one rule where being
+wrong PENDS rather than fails. Leave it at 256 GB. Topic modelling still
+dominates: 70 of the ~108 minutes.
+
+**`R21_report` measured, so no tier is a guess any more**: 72 MB, 6 s. Its node
+and slots are recorded `unknown` for a structural reason given below.
+
+**I7 holds**: the provenance bundle was created on a real run.
+
+**Two joblib warnings, noted and not acted on.** `R10_dem` and `R14_egrn_direct`
+each logged *"A worker stopped while some jobs were given to the executor ...
+memory leak"*. Both completed, with 2.9x and 4.7x headroom. A loky worker
+exiting mid-batch at that margin is churn, not pressure. Recorded so the next
+reader does not re-diagnose it as a resource problem.
+
+#### One defect, mine, and the gate that could not have caught it
+
+**Both t-SNEs skipped**, and the report said so: *"figure 11_* — not produced by
+this run"*. The cause: **MuData PREFIXES obs columns with the modality**, so the
+config's `wsnn_res.0.3` is `scRNA_counts:wsnn_res.0.3` on the object. `main()`
+already resolves this into `rss_var` through a candidate-key search — every
+other consumer in that file uses it — and I passed the raw config value.
+
+It failed exactly as designed: skipped with a message, wrote nothing, and the
+report reported the absence. That is the good half. The bad half is that it
+shipped.
+
+**The gate could not have caught it, and my fixture made that worse.** The
+defect was in the CALL SITE, so calling the function correctly would always
+pass — and my constructed MuData used the bare column name, a shape that does
+not occur on a real object, so even the function was exercised against fiction.
+Both fixed: the fixture now uses `scRNA_counts:cell_type`, and a new check reads
+`main()` as TEXT and requires the resolved variable. Reverting the fix turns it
+red. Its regex needed a lookbehind to skip the function DEFINITION, whose own
+parameter is `ct_col` — without it the check reported the signature as a caller.
+
+#### The report cannot contain its own job, in two places now
+
+`R21_report` appeared under **Logs** and not under **Compute**, which reads as a
+missing job. It is structural: LSF appends a job's accounting when the job ENDS,
+so while R21 renders the page its own epilogue does not exist. Exactly the same
+shape as its log reading 0 bytes, found the same way — by an operator reading a
+real report. The Compute section now says so, and both directions are gated.
+
+Second time this shape has surfaced in this file, third across the two repos.
+*An artifact written DURING a run cannot describe that run completely* is not a
+one-off; it recurs wherever the report describes the run it is part of.
+
+#### First real read of the new figures
+
+The overlap heatmap works as intended. Strongest direct-eRegulon overlap:
+**LEF1 and TCF7** — both TCF/LEF family, both Wnt effectors, genuinely sharing
+motifs. That is close to a positive control: a correct Jaccard MUST put them in
+a block, so seeing it is evidence the arithmetic is right and not merely that
+something was drawn. In the extended set, **FOS and KLF4**, which is a weaker
+pairing and fits: extended eRegulons link motif to TF by annotation rather than
+direct match, so overlap there is both more expected and less meaningful.
+
+---
+
 ### I8 is HELD, pending one cluster run, 2026-09-12
 
 I8 retires the bash driver. Held on purpose, because **nothing built since I3

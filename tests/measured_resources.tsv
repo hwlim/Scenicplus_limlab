@@ -30,6 +30,13 @@
 #    -- so it did NOT exercise the per-rule tiers. What a rule USED is
 #    independent of what it reserved, so these figures size the tiers correctly
 #    regardless; they just do not validate them.
+#
+# 4. R21_report's row is from the 2026-09-12 run, the first on I5's own tiers --
+#    `Total Requested Memory: 4000.00 MB` matches the `4g` tier, confirming it.
+#    Its node and slots are `unknown` for a STRUCTURAL reason, not a missing
+#    paste: R21 renders the report, and LSF appends a job's accounting when the
+#    job ENDS, so R21's own epilogue does not exist while R21 is running. It is
+#    absent from the report's own Compute table for the same reason.
 rule	node	slots	runtime_s	max_mem_mb	max_processes	max_threads
 R01_seurat_export	bmi-460g9-19	1	172	3122	8	11
 R02_build_anndata	bmi-460g10-02	1	22	210	8	11
@@ -51,3 +58,4 @@ R17_aucell_extended	rit-r760xa-01	16	70	11302	16	58
 R18_scplus_mudata	bmi-460g9-19	1	53	3293	9	12
 R19_postprocess_tsv	unknown	unknown	46	3978	8	57
 R20_visualize	unknown	unknown	95	4132	8	57
+R21_report	unknown	unknown	6	72	9	11

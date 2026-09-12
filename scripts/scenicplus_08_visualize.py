@@ -502,8 +502,17 @@ def main():
     combined = pd.concat([direct, extended], ignore_index=True) \
         if (len(direct) + len(extended)) else pd.DataFrame()
     seed = int(cfg.get("resources", {}).get("seed", 555))
-    eregulon_tsne(md, celltype_col, out_dir, "gene", seed)
-    eregulon_tsne(md, celltype_col, out_dir, "region", seed)
+    # rss_var, NOT celltype_col. MuData PREFIXES obs columns with the modality,
+    # so the config's `cell_type` is `scRNA_counts:cell_type` on the object --
+    # which is why the candidate-key search above exists at all. Passing the raw
+    # config value skipped both t-SNEs on the first real run, silently and
+    # correctly, with only the report's "not produced by this run" to show for
+    # it. Every other consumer here already uses rss_var; this one now does too.
+    if rss_var is None:
+        print("[viz] eRegulon t-SNE skipped: no cell-type column on the MuData")
+    else:
+        eregulon_tsne(md, rss_var, out_dir, "gene", seed)
+        eregulon_tsne(md, rss_var, out_dir, "region", seed)
     region_overlap(direct, out_dir, "direct", viz.get("overlap_top_n", 40))
     region_overlap(extended, out_dir, "extended", viz.get("overlap_top_n", 40))
     tf_target_count(combined, out_dir, top_n=40)

@@ -158,6 +158,15 @@ has "a table says how many rows it is showing of" "of 40 rows"
 has "LSF accounting is read from the epilogues"   "bmi-200m5-04"
 has "wall clock is humanised, not raw seconds"    "1:17:31"
 has "the compute note explains the -M caveat"     "per process"
+# R21's own job cannot be in its own Compute table: LSF appends the accounting
+# when the job ENDS. Reported from a real run, where R21 appeared under Logs and
+# not under Compute and read as a missing job. BOTH directions -- it must be
+# absent from the table AND explained, since suppressing the explanation and
+# omitting the row look identical to a reader counting rules.
+grep -q "R21_report" <<<"$(sed -n '/id=compute/,/id=logs/p' "$OUT" | grep -o '<td[^>]*>R21_report</td>')" \
+  && say FAIL "R21 should not be in its own compute table" \
+  || say ok "the report's own job is absent from Compute, as it must be"
+has "...and the page explains WHY it is absent"   "own epilogue does not exist"
 
 # --- 2. THE HALF THAT MATTERS: it says what is NOT there ---------------------
 # NOT just the filename: the section opens with a summary table that lists all

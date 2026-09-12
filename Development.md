@@ -705,6 +705,46 @@
     Its input builder takes the legacy SCENICPLUS class, so reaching it from
     MuData is the trade declined for candidate 2.
 
+20260912: the cluster run -- I5, I6, I7 validated; one defect of mine found
+  - Full 21-rule run on the PBMC arc fixture at 5d01b36, ~108 min summed across
+    six nodes, `celltype_column: wsnn_res.0.3`.
+  - **I5 HOLDS.** Nothing over its reservation, nothing killed, nothing pended,
+    including the 256000 MB R09 asks for -- the one unchecked assumption in the
+    increment. Confirmed as the NEW code by R21's `Total Requested Memory:
+    4000.00 MB`, the same check that caught the previous run as pre-I5.
+    cistarget used 134 GB not 153: 1.9x, the tightest margin, on the rule where
+    being wrong PENDS rather than fails. Leave it.
+  - **I7 holds**: a bundle was created. Its FAILED-run behaviour is still only
+    locally gated.
+  - **R21_report measured** (72 MB, 6 s), so no tier is a guess any more.
+  - **My defect: both t-SNEs skipped.** MuData PREFIXES obs columns with the
+    modality, so `wsnn_res.0.3` is `scRNA_counts:wsnn_res.0.3`. main() already
+    resolves that into `rss_var` -- every other consumer uses it -- and I passed
+    the raw config value. It failed as designed (skipped, wrote nothing, report
+    said so), which is the good half; the bad half is that it shipped.
+  - **The gate could not have caught it, and my fixture made that worse.** The
+    defect was in the CALL SITE, so calling the function correctly always
+    passes -- and my fixture used the bare column name, a shape that does not
+    occur, so even the function was exercised against fiction. Fixture now uses
+    the prefixed name; a new check reads main() as text and requires `rss_var`.
+    Its regex needed a lookbehind to skip the DEFINITION, whose parameter is
+    `ct_col`.
+  - **The report cannot contain its own job, in a SECOND place.** R21 appeared
+    under Logs and not Compute, reading as a missing job. LSF appends accounting
+    at job END, so R21's epilogue does not exist while R21 renders. Same shape
+    as its 0-byte log, found the same way -- an operator reading a real report.
+    Now stated in the Compute section, both directions gated. Third time across
+    the two repos: this recurs wherever a report describes the run it is part
+    of.
+  - Two joblib "worker stopped ... memory leak" warnings (R10_dem,
+    R14_egrn_direct). Both completed with 2.9x and 4.7x headroom -- churn, not
+    pressure. Recorded so it is not re-diagnosed as a resource problem.
+  - **First real read of the new figures.** Strongest direct overlap is LEF1 /
+    TCF7 -- same TCF/LEF family, both Wnt effectors, genuinely sharing motifs,
+    so a correct Jaccard MUST block them together. That is close to a positive
+    control. Extended: FOS / KLF4, a weaker pairing, which fits since extended
+    eRegulons link motif to TF by annotation rather than direct match.
+
 Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
 2026-09-09; artifacts not inspected here). The PARAMETERS have never been
 examined: the topic-count sweep, the DAR thresholds and the search-space width
