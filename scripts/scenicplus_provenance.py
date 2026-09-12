@@ -110,17 +110,28 @@ def mode_start(ws, pipeline):
 
 def scoped_logs(logs_dir, marker_mtime):
     """Files belonging to THIS run: at or after the marker. The marker and the
-    meta file are excluded -- they are bookkeeping, not run output."""
+    meta file are excluded -- they are bookkeeping, not run output.
+
+    The "at or after" test itself comes from the REPORT module, which is the one
+    definition of it. Two copies drifted once already in spirit: the report had
+    no scoping at all while this file did, so a `--forcerun R20` produced a
+    bundle scoped correctly next to a report listing the whole previous run.
+    Sharing the predicate makes that divergence impossible rather than unlikely.
+    """
     out = []
     if not os.path.isdir(logs_dir):
         return out
+    rep = _load_report_module()
+    keep = (rep.in_this_run if rep and hasattr(rep, "in_this_run")
+            else lambda p, since: since is None
+            or os.path.getmtime(p) >= since - 1)
     for root, _, files in os.walk(logs_dir):
         for f in sorted(files):
             if f in (MARKER, META):
                 continue
             p = os.path.join(root, f)
             try:
-                if marker_mtime is None or os.path.getmtime(p) >= marker_mtime - 1:
+                if keep(p, marker_mtime):
                     out.append(p)
             except OSError:
                 continue

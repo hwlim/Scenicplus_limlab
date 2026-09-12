@@ -129,6 +129,35 @@ Job was executed on host(s) <16*bmi-200m5-03>, in queue <normal>, as user <x>
     Max Processes :                              31
     Max Threads :                                1332
 LSF
+# A PREVIOUS run's leftovers, then a fresh marker: exactly what `--forcerun R20`
+# leaves behind. Reported from a real forcerun, where the report listed the whole
+# previous run and put R21_report in the Compute table with the PREVIOUS run's
+# numbers -- a row that looks current and is not.
+printf 'from an older run\n' > "$WS/logs/R98_ancient.log"
+cat > "$WS/logs/lsf/R97_stale.1.out" <<'LSF'
+Job was executed on host(s) <8*a-node-from-last-week>, in queue <normal>, as user <x>
+    Run time :                                   999 sec.
+    Max Memory :                                 4242 MB
+    Max Processes :                              3
+    Max Threads :                                4
+LSF
+cat > "$WS/logs/lsf/R21_report.7.out" <<'LSF'
+Job was executed on host(s) <bmi-200m5-07>, in queue <normal>, as user <x>
+    Run time :                                   6 sec.
+    Max Memory :                                 72 MB
+    Max Processes :                              9
+    Max Threads :                                11
+LSF
+# Only the two that belong to the previous run. R04's epilogue stays current --
+# backdating it too silently removed the data an unrelated check reads, and that
+# check went red rather than the scoping one. A fixture change that breaks
+# another assertion is a fixture bug, not a finding.
+touch -t 202001010000 "$WS/logs/R98_ancient.log" \
+                      "$WS/logs/lsf/R21_report.7.out" \
+                      "$WS/logs/lsf/R97_stale.1.out"
+sleep 0.1
+: > "$WS/logs/.run_started"          # this run begins HERE
+sleep 0.1
 printf 'ran fine\n' > "$WS/logs/R01_seurat_export.log"
 : > "$WS/logs/R20_visualize.log"          # empty on purpose -- a REAL alarm
 # The report's own log, empty exactly as it is on a real run: `tee` creates it
@@ -156,6 +185,16 @@ has "the direct eRegulon table is rendered"       "GENE1"
 has "the TF summary is rendered"                  "SPIB"
 has "a table says how many rows it is showing of" "of 40 rows"
 has "LSF accounting is read from the epilogues"   "bmi-200m5-04"
+# SCOPED to this run. An older epilogue must not appear, however plausible.
+# A stale epilogue from a rule that is NOT R21, so this is independent of the
+# report's own-job case below -- otherwise one fix would appear to satisfy both.
+grep -q "R97_stale\|a-node-from-last-week" <<<"$(sed -n '/id=compute/,/id=logs/p' "$OUT")" \
+  && say FAIL "a PREVIOUS run's epilogue leaked into Compute" \
+  || say ok "an older run's epilogue is NOT in Compute"
+grep -q "R98_ancient" "$OUT" \
+  && say FAIL "a previous run's log is listed as this run's" \
+  || say ok "an older run's log is NOT listed"
+has "...and the page says how many it left out" "belong to earlier runs"
 has "wall clock is humanised, not raw seconds"    "1:17:31"
 has "the compute note explains the -M caveat"     "per process"
 # R21's own job cannot be in its own Compute table: LSF appends the accounting

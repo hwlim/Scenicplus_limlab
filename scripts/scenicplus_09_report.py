@@ -217,6 +217,45 @@ def run_git(repo, *args):
         return ""
 
 
+# --- Scoping a workspace's logs to THIS run ----------------------------------
+RUN_MARKER = ".run_started"
+
+
+def run_started_mtime(logs_dir):
+    """When this run began, from the marker R21's sibling handler writes.
+
+    THE ONE DEFINITION of this rule, used by the report AND imported by
+    scenicplus_provenance.py, which already loads this module for the LSF
+    parser. Two copies would drift and the drift would be silent, both still
+    producing plausible log lists.
+
+    WHY IT IS NEEDED AT ALL. `logs/` accumulates across runs and `bsub -o`
+    APPENDS, so one epilogue file can hold several runs' accounting, and
+    snakemake's `{jobid}` restarts at 0 each run so filenames are reused.
+    Without scoping, a `--forcerun R20` shows every log the workspace has ever
+    had as though it belonged to this run. Reported from a real forcerun, where
+    the report listed the whole previous run and put `R21_report` in the Compute
+    table with the PREVIOUS run's numbers -- a row that looks current and is
+    not, which is worse than the absence it replaced.
+    """
+    p = os.path.join(logs_dir, RUN_MARKER)
+    try:
+        return os.path.getmtime(p)
+    except OSError:
+        return None
+
+
+def in_this_run(path, since):
+    """A one-second slack, because filesystem mtime granularity is not finer
+    than the gap between writing the marker and the first job starting."""
+    if since is None:
+        return True
+    try:
+        return os.path.getmtime(path) >= since - 1
+    except OSError:
+        return False
+
+
 # --- LSF accounting ----------------------------------------------------------
 # Same fields tests/measured_resources.tsv carries, read from this run's own
 # logs so the report says what THIS run cost rather than what a past one did.
@@ -229,7 +268,7 @@ _FIELD = re.compile(r"^\s*(Run time|Max Memory|Max Processes|Max Threads)"
                     r"\s*:\s*(\d+)", re.M)
 
 
-def lsf_accounting(lsf_dir):
+def lsf_accounting(lsf_dir, since=None):
     """One row per rule, from the LAST job for that rule.
 
     `bsub -o` APPENDS and snakemake's {jobid} restarts at 0 each run, so one
@@ -242,6 +281,8 @@ def lsf_accounting(lsf_dir):
         if not name.endswith(".out"):
             continue
         rule = name.split(".")[0]
+        if not in_this_run(os.path.join(lsf_dir, name), since):
+            continue
         try:
             text = open(os.path.join(lsf_dir, name), errors="replace").read()
         except OSError:
@@ -482,9 +523,9 @@ def sec_figures(plots_dir, ws, max_bytes):
     return "\n".join(out)
 
 
-def sec_compute(lsf_dir, self_rule=None):
+def sec_compute(lsf_dir, self_rule=None, since=None):
     out = ["<h2 id=compute>Compute</h2>"]
-    rows = lsf_accounting(lsf_dir)
+    rows = lsf_accounting(lsf_dir, since=since)
     if not rows:
         out.append('<p class="note">No LSF accounting found in '
                    f'<code>{esc(lsf_dir)}</code>. Expected for a local run; '
@@ -542,7 +583,7 @@ def sec_config(cfg_path):
     return "\n".join(out)
 
 
-def sec_logs(logs_dir, ws, self_log=None):
+def sec_logs(logs_dir, ws, self_log=None, since=None):
     """The run's logs, and which of them are suspiciously empty.
 
     THE REPORT'S OWN LOG IS ALWAYS EMPTY HERE, and that is not a finding. The
@@ -564,9 +605,11 @@ def sec_logs(logs_dir, ws, self_log=None):
     out = ["<h2 id=logs>Logs</h2>"]
     if not os.path.isdir(logs_dir):
         return "\n".join(out) + missing(logs_dir)
-    files = sorted(f for f in os.listdir(logs_dir) if f.endswith(".log"))
+    allf = sorted(f for f in os.listdir(logs_dir) if f.endswith(".log"))
+    files = [f for f in allf if in_this_run(os.path.join(logs_dir, f), since)]
+    older = len(allf) - len(files)
     if not files:
-        return "\n".join(out) + missing("any .log in " + logs_dir)
+        return "\n".join(out) + missing("any .log from this run in " + logs_dir)
     self_name = os.path.basename(self_log) if self_log else None
     rows, empty, self_seen = [], [], False
     for f in files:
@@ -583,6 +626,17 @@ def sec_logs(logs_dir, ws, self_log=None):
                      note])
     out.append(table_html(["Log", "Bytes", "Modified", "Note"], rows,
                           limit_note=False))
+    if since is None:
+        out.append('<p class="note"><strong>Scope unknown.</strong> No '
+                   '<code>logs/.run_started</code> marker, so these are EVERY '
+                   'log in the directory, not this run\u2019s. A workspace last '
+                   'run before the marker existed looks like this; the next run '
+                   'writes one.</p>')
+    elif older:
+        out.append(f'<p class="note">{older} older log(s) in the directory are '
+                   f'not listed: they belong to earlier runs. `logs/` '
+                   f'accumulates and <code>bsub -o</code> appends, so scoping is '
+                   f'by <code>logs/.run_started</code>.</p>')
     if self_seen:
         out.append(f'<p class="note"><code>{esc(self_name)}</code> reads as '
                    f'0 bytes above and is NOT counted as an empty log. The rule '
@@ -605,6 +659,9 @@ def build(ws, cfg_path, repo, head_rows, max_bytes, self_log=None):
     except Exception:
         cfg = {}
     j = lambda *p: os.path.join(ws, *p)
+    # One read of the marker, shared by Compute and Logs so they cannot disagree
+    # about which run they are describing.
+    _since = run_started_mtime(os.path.join(ws, "logs"))
     parts = [
         sec_run(cfg, cfg_path, ws, repo),
         sec_assembly(j("QC", "assembly.json")),
@@ -613,8 +670,9 @@ def build(ws, cfg_path, repo, head_rows, max_bytes, self_log=None):
         sec_figures(j("5.analysis", "plots"), ws, max_bytes),
         sec_compute(j("logs", "lsf"),
                     os.path.splitext(os.path.basename(self_log))[0]
-                    if self_log else None),
-        sec_logs(j("logs"), ws, self_log),
+                    if self_log else None,
+                    since=_since),
+        sec_logs(j("logs"), ws, self_log, since=_since),
         sec_config(cfg_path),
     ]
     toc = """<div class="toc"><strong>On this page</strong><ul>

@@ -745,6 +745,32 @@
     control. Extended: FOS / KLF4, a weaker pairing, which fits since extended
     eRegulons link motif to TF by annotation rather than direct match.
 
+20260912: the forcerun -- the report had no run scoping, and it showed twice
+  - `--forcerun R20` redrew the t-SNEs. **They work**: cells group by identity
+    in eRegulon space -- B, T, monocyte. That is the claim the figure exists to
+    test, and the UMAP cannot make it, having been computed from expression.
+  - Two symptoms, ONE bug. The report listed every log the workspace had ever
+    had, and `R21_report` appeared in Compute with the PREVIOUS run's numbers.
+  - **The report globbed `logs/` with no scoping**, while the provenance bundle
+    scoped by `logs/.run_started`. I built the scoping into one and not the
+    other -- so a forcerun produced a correctly scoped bundle beside a report
+    describing the whole previous run.
+  - The R21 row was the same cause and WORSE than the absence it replaced:
+    `bsub -o` APPENDS, so its epilogue from the earlier run was still on disk
+    and the parser read it as current. A stale row that looks live beats a
+    missing one only in the sense that nobody notices.
+  - Both sections now scope to the marker, from ONE predicate the provenance
+    script imports rather than copies. The report also STATES its scope: how
+    many older logs it omitted, or -- with no marker -- that the scope is
+    unknown and these are all-time logs, which is what a workspace last run
+    before the marker existed looks like.
+  - Removing the scoping reproduces both symptoms at once, which is the gate.
+  - **Two fixture mistakes of mine, both caught by other checks.** I backdated
+    the file an unrelated assertion reads, turning THAT check red instead of the
+    scoping one. And my leak assertion named a rule belonging to the current
+    run, contradicting my own fixture. The stale epilogue is now a dedicated
+    rule, independent of the R21 case, so one fix cannot appear to satisfy both.
+
 Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
 2026-09-09; artifacts not inspected here). The PARAMETERS have never been
 examined: the topic-count sweep, the DAR thresholds and the search-space width
