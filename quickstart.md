@@ -34,7 +34,7 @@ when yours has no cell-type labels yet.
 |---|---|---|
 | A. environment | install once, on a compute node | install once |
 | B. reference data | already on `/data/limlab`, nothing to download | download 45.7 GB yourself |
-| F. running | LSF, through a small `run.sh` | `scenicplus_run_workstation.sh` |
+| F. running | `scenicplus.run.sh --lsf`, through a small `run.sh` | `scenicplus.run.sh -j <cores>` |
 | what to expect | the tested path | steps 1 to 3 are comfortable; steps 9 onward need the 45.7 GB of databases and far more memory than a laptop has |
 
 **This has run end to end at CCHMC and nowhere else.** The environment recipe
@@ -149,17 +149,20 @@ believe its numbers.
 
 RUNBOOK section 4.
 
-    scenicplus_run_pipeline.sh --dry-run       # prints the plan, runs nothing
+    scenicplus.run.sh -n                       # prints the plan, runs nothing
 
 **On your own machine:**
 
-    scenicplus_run_workstation.sh              # runs here, in this shell
+    scenicplus.run.sh -j 8                     # runs here, on 8 cores
 
-**On the CCHMC HPC**, every run to date has gone through
-`scenicplus_run_lsf.sh`, called from a small `run.sh` kept in the analysis
-directory that sets up the environment and passes the LSF settings. Keeping it
-there rather than in shell history puts the settings a run used beside that
-run's outputs, and makes a re-run one command. A skeleton to adapt:
+**On the CCHMC HPC**, `--lsf` submits each rule as its own job, sized from a
+measurement rather than from the heaviest step:
+
+    scenicplus.run.sh --lsf -j 20              # at most 20 cluster jobs at once
+
+Keep the invocation in a small `run.sh` in the analysis directory rather than in
+shell history. That puts the settings a run used beside that run's outputs, and
+makes a re-run one command. A skeleton to adapt:
 
 ```bash
 #!/usr/bin/env bash
@@ -173,67 +176,90 @@ export SCENICPLUS_PATH=/path/to/Scenicplus_limlab
 export PATH=$SCENICPLUS_PATH/scripts:$PATH
 export PYTHONNOUSERSITE=1
 
-# Reproducibility. Without these, two runs of the same data on the same
-# cluster do not agree. Both effects are measured, not theoretical:
-#   PYTHONHASHSEED  python randomises string hashing per process, and SCENIC+
-#                   builds lists from sets of names, so the order changes every
-#                   invocation. Pandas sorts are stable, so a permuted order
-#                   permutes ties and a top-N cut then keeps different rows.
-#   *_NUM_THREADS   the maths libraries take their thread count from the host's
-#                   core count, and reduction order follows thread count. A
-#                   48-core and a 64-core node gave correlations differing in
-#                   the last bit.
-# Keep the thread number equal to resources.n_cpu, which is what the Snakemake
-# workflow pins to; the two drivers are only comparable if they agree.
-export PYTHONHASHSEED=0
-export OMP_NUM_THREADS=16 OPENBLAS_NUM_THREADS=16 MKL_NUM_THREADS=16 NUMEXPR_NUM_THREADS=16
-
-export LSF_QUEUE=normal LSF_PROJECT=scenicplus
-export LSF_CORES=16 LSF_MEM_MB=128000 LSF_WALLTIME=72:00
-scenicplus_run_lsf.sh "$@"                  # --from 7, --only 20, --force, ...
+scenicplus.run.sh --lsf -j 20 "$@"          # -n, -f 7, -- --forceall, ...
 ```
 
-Then `./run.sh` submits, and `./run.sh --from 7` forwards the flag.
+Then `./run.sh` submits, and `./run.sh -f 7` forwards the flag.
+
+**You no longer set the reproducibility variables yourself.** The workflow pins
+`PYTHONHASHSEED` and the four `*_NUM_THREADS` for every rule, deriving the
+thread count from `resources.n_cpu`, so the two cannot disagree. That matters:
+without them two runs of the same data on the same cluster do not agree, and
+both effects are measured. Python randomises string hashing per process and
+SCENIC+ builds lists from sets of names, so a permuted order permutes ties and a
+top-N cut keeps different rows; and the maths libraries take their thread count
+from the host's cores, with reduction order following it. A 48-core and a
+64-core node gave correlations differing in the last bit.
+
+**You no longer set memory or cores either.** Each rule carries its own
+reservation, measured from a real run: 4 GB for the report, 96 GB for topic
+modelling, 256 GB for cistarget. RUNBOOK section 5b has the table.
 
 **Submit from the node class the environment was built for.** The preflight runs
 on the host you submit from, before anything is queued, so it checks the shell
-you are typing in rather than the one the job will get. Two consequences, both
+you are typing in rather than the one the jobs will get. Two consequences, both
 of which have cost time here: R must be loaded to submit and not only to run,
 and a login node whose glibc or modules differ from the compute nodes fails the
-check with nothing queued. Start an interactive session on the right class and
-run the runner there.
+check with nothing queued. Start an interactive session on the right class.
 
-**That same shell becomes the job's environment.** `scenicplus_run_lsf.sh`
-submits `/bin/bash -c` and loads no modules inside the job, while LSF carries
-the submission environment across, so whatever `run.sh` sets is what all twenty
-steps run under. `LD_LIBRARY_PATH` is the exception, since the driver prepends
-the environment's `lib` itself.
+### The bash driver, if you need it
 
-The memory figure above is an example, not a measured requirement. RUNBOOK
-section 5b explains what drives it: step 4 dominates, and its peak is the sum
-over the topic models fitted at once.
+`scenicplus_run_pipeline.sh` still works and prints a notice saying it is
+obsolete. It is kept as a fallback and for reproducing an older run. It submits
+all twenty steps as ONE job sized for the heaviest, so the plotting step holds
+cistarget's cores and memory for hours, and it produces no report and no
+provenance bundle. Converting a habit:
+
+| bash driver | workflow |
+|---|---|
+| `scenicplus_run_pipeline.sh --dry-run` | `scenicplus.run.sh -n` |
+| `--from 7` | `-f 7` |
+| `--force` | `-- --forceall` |
+| `scenicplus_run_workstation.sh` | `scenicplus.run.sh -j <cores>` |
+| `scenicplus_run_lsf.sh` | `scenicplus.run.sh --lsf -j 20` |
 
 ## G. Watch, then read
 
 RUNBOOK sections 4 and 5.
 
     bjobs                                      # HPC only
-    tail -f logs/01_seurat_to_anndata.log      # one log per step
-    ls results/plots results/tables
+    tail -f logs/R04_topic_modeling.log        # one log per rule
+    open report.html                           # the point of the run
 
-Every UMAP figure names in its title the layout it was drawn on. If that is not
-the reduction you chose, re-read E.
+**Start with `report.html`.** `rule all` targets it, so a run is not finished
+until it is readable. It carries the run's provenance, the genome check, the
+eRegulon tables, every figure, this run's LSF accounting and its logs.
 
-A step is skipped when its output exists, the config keys it reads have not
+Two things in it are worth knowing before you read them. The Genome section
+confirms the assembly from chromosome 1's measured length, and says so plainly
+when `input.assembly` is unset and therefore nothing checked it. And the
+eRegulon-activity t-SNE is the ONE figure on its own layout: every other is
+drawn on the reduction you named in E, so its coordinates are not comparable
+with them.
+
+`provenance/<timestamp>_<status>/` is written at the end of every run, success
+or failure, and records the commit captured when the run STARTED rather than
+when it ended. On a failure it names the logs carrying an error signature.
+
+A rule is skipped when its outputs exist, its inputs and params have not
 changed, and nothing upstream is newer. So a re-run continues rather than
-starting over, and changing one parameter re-runs only the steps that read it.
-The driver decides all of that from files under `results/`, so ask for work with
-`--from N` or `--force` rather than by deleting outputs.
+starting over, and changing one config value re-runs the rules that read it.
+Ask for work with `-f N` or `-- --forceall` rather than by deleting outputs, and
+**never delete `.snakemake/`** — four of the five rerun triggers compare against
+what is recorded there, and without it a config edit silently does nothing.
 
 ## When something fails
 
-1. `logs/NN_<step>.log` holds that step's own output, and the driver names the
-   step it stopped on.
-2. RUNBOOK section 6 lists the failures already seen and what each one means.
-3. RUNBOOK section 7 records what has actually been run, so you can tell whether
+1. **`provenance/<timestamp>_error/manifest.txt`** names the logs carrying an
+   error signature, so it says where to look rather than handing you a
+   directory. It is written on failure as well as success.
+2. `logs/<rule>.log` holds that rule's own output. On LSF, `logs/lsf/<rule>.*.out`
+   holds the same text plus the accounting, and it survives the re-run that
+   fixes the problem, because `bsub -o` APPENDS while the rule log is rewritten.
+   Read the LAST block.
+3. **There is NO report.html after a failure**, and that is expected rather than
+   a second problem: snakemake does not build a target whose inputs failed. The
+   logs and the bundle are what a partial run leaves.
+4. RUNBOOK section 6 lists the failures already seen and what each one means.
+5. RUNBOOK section 7 records what has actually been run, so you can tell whether
    you are on a tested path or the first person to try something.

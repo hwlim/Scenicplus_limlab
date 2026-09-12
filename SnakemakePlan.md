@@ -285,7 +285,7 @@ first: there is a trusted end-to-end result to diff against.
 | **I5** | per-rule resources + LSF profile | **built 2026-09-11, local gates only.** Tiers derived from `tests/measured_resources.tsv`; `tests/test_resources.py` + `dryrun.sh` 7b. Still wants a real cluster run |
 | **I6** | `report.html`, and `rule all` switched to it | **built 2026-09-11, local gates only.** `tests/report_render.sh` renders a partial workspace and asserts what the page says is MISSING; still wants a cluster run |
 | **I7** | provenance bundle (config.used, git, logs, `lsf_jobs.tsv`, `assembly.json`) | **built 2026-09-11, local gates only.** `tests/provenance.sh` runs a real workflow twice, once failing, and checks the stated gate directly; the last case runs the REAL Snakefile |
-| **I8** | retire `scenicplus_run_pipeline.sh` | the runner is the only entry point; `quickstart.md` and RUNBOOK both rewritten |
+| **I8** | retire `scenicplus_run_pipeline.sh` | **built 2026-09-12, scoped to DEPRECATION not deletion.** The runner is the documented entry point; `quickstart.md` and RUNBOOK both rewritten; the driver prints a notice and still works |
 
 ### I0 is built and gated, 2026-09-09
 
@@ -1218,6 +1218,47 @@ pairing and fits: extended eRegulons link motif to TF by annotation rather than
 direct match, so overlap there is both more expected and less meaningful.
 
 ---
+
+### I8 is built, as DEPRECATION rather than deletion, 2026-09-12
+
+The plan said "retire `scenicplus_run_pipeline.sh`" and meant delete it. Scoped
+down deliberately: **the driver still works, and is kept.**
+
+Why keep it. It is the fallback if the workflow hits something on the cluster,
+and it is how an older run is reproduced — both of which stop being possible the
+moment it is deleted. Neither costs anything while it sits there.
+
+Why obsolete it anyway, in one sentence that no care inside the driver can fix:
+**it submits all twenty steps as ONE job sized for the heaviest**, so step 20's
+few plots hold cistarget's sixteen cores and its memory for hours. Three more,
+each of which cost a real run here: `.cfgsha` hashes CONFIG not CODE, so a step
+whose script changed stays "fresh"; independent stages cannot run at once; and
+it produces neither `report.html` nor a provenance bundle.
+
+**What landed.** A deprecation block at the top of the driver and a runtime
+notice it prints on every invocation — printed, not fatal, because making it an
+error would break the fallback it exists to be. `quickstart.md` sections F and G
+rewritten around `scenicplus.run.sh`, with a conversion table for habits.
+RUNBOOK section 4 rewritten, the driver moved into a subsection under it, and
+section 5's table regenerated.
+
+**Section 5's table is now GENERATED from the sources**, not transcribed: rule
+outputs from the resolved DAG, reservations from `RULE_TIERS`, measurements from
+`tests/measured_resources.tsv`. It used to list sentinels under `results/`,
+which is the driver's layout, and it would have drifted again the next time a
+tier moved.
+
+**Two defects of my own on the way, both found by checking rather than by
+writing.** The runner's header still said *"increment I0 ... no step rules to
+schedule yet"*, months stale. And `--help` printed `sed -n '2,26p'` — a
+HARDCODED line range — so rewriting that header truncated the help mid-sentence
+with nothing to notice it. Help is now derived from the comment block itself and
+cannot be cut by an edit above it.
+
+**Not deleted, and the plan's own gate is therefore not met as written** ("the
+runner is the only entry point"). That is the intended change of scope, not an
+omission. Deletion stays a one-line follow-up whenever the driver has gone
+unused long enough to be missed by nobody.
 
 ### I8 is HELD, pending one cluster run, 2026-09-12
 

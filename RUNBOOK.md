@@ -20,7 +20,9 @@ already known to differ.
 ## Quickstart
 
 Moved to [quickstart.md](quickstart.md), which is the path to follow: install
-through submission, for the CCHMC HPC or a personal machine. It points back here
+through submission, for the CCHMC HPC or a personal machine. It runs the
+Snakemake workflow (`scenicplus.run.sh`); the bash driver is obsolete but kept,
+and section 4 covers both. It points back here
 for the reasoning behind each step, and this file stays the reference rather than
 the tutorial.
 
@@ -121,8 +123,8 @@ whose `DT_RUNPATH` does not find the env's copy, so they load the **system**
 one — and a soname loaded once is never searched for again, so conda's ICU
 (which needs `CXXABI_1.3.15`) then fails against it on any node whose `/lib64`
 predates GCC 13. Prepending the env's `lib` makes the first load resolve inside
-the env. `scenicplus_run_pipeline.sh` sets this itself; export it too when
-running steps by hand.
+the env. Both drivers set this themselves; export it too when running steps by
+hand.
 
 ---
 
@@ -261,49 +263,102 @@ from `celltype_column`. A finished run therefore does not need recomputing — s
 
 ## 4. Run
 
-    scenicplus_run_pipeline.sh --dry-run     # plan only, runs nothing
-    scenicplus_run_pipeline.sh               # everything stale
+**The Snakemake workflow is the path.** The bash driver below still works and is
+kept, but is obsolete.
+
+    scenicplus.run.sh -n                     # plan only, runs nothing
+    scenicplus.run.sh -j 8                   # run here, on 8 cores
+    scenicplus.run.sh --lsf -j 20            # one LSF job per rule, 20 at once
+    scenicplus.run.sh -f 9                   # force from step 9 (rule R09_*)
+    scenicplus.run.sh -- --forceall          # everything
+    scenicplus.run.sh -p                     # also print each shell command
+
+21 rules: `R01_*` through `R20_*` are the twenty steps, and `R21_report` builds
+`report.html`, which `rule all` targets — so a run is not finished until it is
+readable. `--list` prints them in order with each rule's docstring.
+
+A rule re-runs when its outputs are missing, its **inputs** changed, its
+**params** changed, or its **code** changed. That last one is the difference
+that matters: the bash driver hashes CONFIG only, so a step whose SCRIPT changed
+stayed "fresh" — which is how a `tag_cells=False` fix reached no workspace.
+
+**Never delete `.snakemake/`.** Four of the five triggers are differential: they
+compare this job against what is recorded there. Delete it and only mtime
+survives, so a config edit silently does nothing and the run reports *"Nothing
+to be done"* while telling you, in a line that reads like a note about the past,
+that jobs have missing provenance. Recover with `-- --forceall`, never
+`--touch`.
+
+Each rule carries its own reservation, measured on a real run — section 5b has
+the table. Nothing needs `LSF_MEM_MB` or `LSF_CORES` any more, and the
+reproducibility variables are pinned per rule from `resources.n_cpu` rather than
+exported by hand.
+
+### The bash driver — obsolete, kept
+
+    scenicplus_run_pipeline.sh --dry-run     # prints a deprecation notice, then runs
     scenicplus_run_pipeline.sh --only 4      # one step
     scenicplus_run_pipeline.sh --from 9      # force step 9 onward
-    scenicplus_run_pipeline.sh --force       # everything
-
     scenicplus_run_workstation.sh            # thin wrapper, runs here
-    scenicplus_run_lsf.sh                    # bsubs the driver as one job
+    scenicplus_run_lsf.sh                    # bsubs the whole driver as ONE job
 
-A step is skipped iff its sentinel exists, its `.cfgsha` matches the hash of the
-config keys **that step** reads, and no upstream sentinel is newer. Once any
-step runs, every later step is force-run in the same invocation.
+Kept as a fallback if the workflow hits something on the cluster, and for
+reproducing an older run. Not deleted; not the path to take. What it cannot do:
 
-Change one GRN parameter and only that stage and its downstream re-run —
-verified: editing `grn.tf_to_gene_importance_method` skipped 1–11 and re-ran
-12–20.
+- **One job for twenty steps, sized for the heaviest.** Step 20's few plots hold
+  cistarget's 16 cores and its memory for hours.
+- **`.cfgsha` hashes config, not code** — see above.
+- **No intra-DAG parallelism**: cistarget and dem are serial here, concurrent
+  under the workflow.
+- **No `report.html` and no provenance bundle.**
+
+Its own resume rule, for reading an old workspace: a step is skipped iff its
+sentinel exists, its `.cfgsha` matches the hash of the config keys **that step**
+reads, and no upstream sentinel is newer. Once any step runs, every later step
+is force-run in the same invocation. Verified: editing
+`grn.tf_to_gene_importance_method` skipped 1–11 and re-ran 12–20.
 
 ---
 
-## 5. The 20 steps
+## 5. The 21 rules
 
-| # | step | sentinel (under `results/`) | notes |
-|---|---|---|---|
-| 1 | seurat_to_anndata | `interim/seurat_export/summary.txt` | R. **23 s, 1.2 GB** |
-| 2 | build_anndata | `interim/rna.h5ad` | **15 s, 0.6 GB** |
-| 3 | create_cistopic | `interim/cistopic_obj.pkl` | **5 s, 1.2 GB** |
-| 4 | topic_modeling | `interim/cistopic_obj_with_topics.pkl` | **LDA, uses Ray.** Heaviest early step |
-| 5 | region_sets | `interim/region_sets/.done` | DARs + topic regions |
-| 6 | prepare_gex_acc | `scplus_out/ACC_GEX.h5mu` | first flattened GRN stage |
-| 7 | genome_annot | `scplus_out/genome_annotation.tsv` | biomart; **chromsizes half is broken upstream** — see below |
-| 8 | search_space | `scplus_out/search_space.tsv` | |
-| 9 | cistarget | `scplus_out/ctx_results.hdf5` | **needs ctx_db** |
-| 10 | dem | `scplus_out/dem_results.hdf5` | **needs dem_db** |
-| 11 | prepare_menr | `scplus_out/cistromes_direct.h5ad` | |
-| 12 | tf_to_gene | `scplus_out/tf_to_gene_adj.tsv` | |
-| 13 | region_to_gene | `scplus_out/region_to_gene_adj.tsv` | |
-| 14 | egrn_direct | `scplus_out/eRegulons_direct.tsv` | |
-| 15 | egrn_extended | `scplus_out/eRegulons_extended.tsv` | |
-| 16 | aucell_direct | `scplus_out/AUCell_direct.h5mu` | |
-| 17 | aucell_extended | `scplus_out/AUCell_extended.h5mu` | |
-| 18 | scplus_mudata | `scplus_out/scplusmdata.h5mu` | the GRN result |
-| 19 | postprocess_tsv | `tsv/eRegulons_combined.tsv` | |
-| 20 | visualize | `plots/01_umap_celltype.pdf` | |
+Outputs are the workflow's, under the stage layout. Reservations come from
+`RULE_TIERS` in `rules/common.smk`; the measurements are the 2026-09-12 cluster
+run on the PBMC arc fixture, recorded in `tests/measured_resources.tsv`. Both
+columns are generated from those files rather than typed, so they cannot drift
+from what actually runs.
+
+| rule | first output | reserved MB | measured | notes |
+|---|---|---|---|---|
+| R01_seurat_export | `1.export/seurat_export/` | 16,000 | 2:52, 3,122 MB |  |
+| R02_build_anndata | `2.anndata/rna.h5ad` | 4,000 | 0:22, 210 MB |  |
+| R03_create_cistopic | `3.cistopic/cistopic_obj.pkl` | 32,000 | 0:48, 8,975 MB |  |
+| R04_topic_modeling | `3.cistopic/cistopic_obj_with_topics.pkl` | 96,000 | 77:31, 21,745 MB | heaviest by TIME; also writes `QC/topic_model_selection.*` |
+| R05_region_sets | `3.cistopic/region_sets/` | 128,000 | 2:43, 34,804 MB | DARs + topic regions |
+| R06_prepare_gex_acc | `4.grn/ACC_GEX.h5mu` | 32,000 | 1:49, 8,211 MB |  |
+| R07_genome_annot | `4.grn/genome_annotation.tsv` | 4,000 | 0:08, 48 MB | CHECKS the supplied pair, does not download; writes `QC/assembly.json` |
+| R08_search_space | `4.grn/search_space.tsv` | 16,000 | 1:30, 4,096 MB |  |
+| R09_cistarget | `4.grn/ctx_results.hdf5` | 256,000 | 11:22, 152,566 MB | needs `ctx_db`; heaviest by MEMORY |
+| R10_dem | `4.grn/dem_results.hdf5` | 192,000 | 6:49, 87,531 MB | needs `dem_db` |
+| R11_prepare_menr | `4.grn/cistromes_direct.h5ad` | 32,000 | 2:23, 9,239 MB |  |
+| R12_tf_to_gene | `4.grn/tf_to_gene_adj.tsv` | 32,000 | 4:14, 7,916 MB |  |
+| R13_region_to_gene | `4.grn/region_to_gene_adj.tsv` | 32,000 | 11:34, 10,622 MB |  |
+| R14_egrn_direct | `4.grn/eRegulons_direct.tsv` | 128,000 | 3:23, 37,970 MB |  |
+| R15_egrn_extended | `4.grn/eRegulons_extended.tsv` | 128,000 | 5:14, 41,477 MB |  |
+| R16_aucell_direct | `4.grn/AUCell_direct.h5mu` | 48,000 | 1:10, 11,299 MB |  |
+| R17_aucell_extended | `4.grn/AUCell_extended.h5mu` | 48,000 | 1:10, 11,302 MB |  |
+| R18_scplus_mudata | `4.grn/scplusmdata.h5mu` | 16,000 | 0:53, 3,293 MB | the GRN result |
+| R19_postprocess_tsv | `5.analysis/tsv/` | 16,000 | 0:46, 3,978 MB |  |
+| R20_visualize | `5.analysis/plots/` | 16,000 | 1:35, 4,132 MB |  |
+| R21_report | `report.html` | 4,000 | 0:06, 72 MB | `rule all` targets this; not a step, the driver has no equivalent |
+
+A rule's reservation is checked against its measurement by
+`tests/test_resources.py`, at 3x for rules whose memory grows with the
+experiment and 1.5x for the two whose memory is set by the cisTarget databases
+they read. Lower a tier without lowering the measurement and it turns red.
+
+The bash driver writes the same artifacts under `results/` with a different
+layout, and its own resume uses sentinel files there. Section 4 has the mapping.
 
 ## 5b. Making a fresh run faster
 
@@ -341,10 +396,14 @@ straight out of step 01's `seurat_export/embedding_<name>.tsv`, which a finished
 workspace already has for every reduction the object carried:
 
     # set input.reduction first, then
-    scenicplus_run_pipeline.sh --only 20
+    scenicplus.run.sh -f 20        # redraw the figures and the report
 
-`--only` bypasses the cascade, so this touches nothing but `results/plots/`.
-Check the new titles: each figure names the layout it was drawn on.
+Forcing R20 re-runs it and `R21_report` and nothing else, because nothing
+upstream changed — about two minutes. Check the new titles: each figure names
+the layout it was drawn on.
+
+The obsolete equivalent is `scenicplus_run_pipeline.sh --only 20`, whose
+`--only` bypasses the cascade and so leaves no report rebuilt.
 
 **For a plumbing test rather than a result**, the combination that changes the
 least science per second saved is `n_topics: [10,20,30]` + `gsea_n_perm: 250` +
@@ -460,7 +519,7 @@ Updated 2026-09-09.
 | **Retiring the bash driver (I8)** | **HELD 2026-09-12, deliberately.** Nothing built since I3 has completed a cluster run on the current code, so deleting the driver would remove the fallback before the replacement is proven. One end-to-end run settles I5's tiers, R21's tier, I6's report, I7's bundle and the three new figures at once. Before it: confirm a node has the 256000 MB R09 reserves, or the job pends rather than fails |
 | reproducibility | `PYTHONHASHSEED` and the BLAS thread variables must be pinned, or two runs of the same data DISAGREE -- by eRegulon membership, not just by bytes. The workflow pins them for every rule; a `run.sh` driving the bash pipeline must export them itself (Quickstart G) |
 | `input.reduction` | **confirmed on the cluster 2026-09-09**: a named reduction produces the figure it names. The `--only 20` redraw of a finished run is the exercised path |
-| submission | every cluster run has used `scenicplus_run_lsf.sh`, driven by a per-workspace `run.sh` ([quickstart.md](quickstart.md) section F). `scenicplus_run_lsf_cchmc.sh` has never been the path in use |
+| submission | cluster runs through 2026-09-11 used `scenicplus_run_lsf.sh`, driven by a per-workspace `run.sh`. The 2026-09-12 run used `scenicplus.run.sh --lsf`, which is now the path ([quickstart.md](quickstart.md) section F). `scenicplus_run_lsf_cchmc.sh` has never been in use |
 | driver sentinel/cascade logic | validated by simulation, then in practice — a `grn.*` edit re-ran 12–20 and skipped 1–11 |
 
 **Outputs that have been looked at,** as opposed to merely produced:

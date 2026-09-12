@@ -799,6 +799,32 @@
     prints both sets. It also lists keys written and not shown, so dropping
     something useful stays a decision.
 
+20260912: increment I8 -- the bash driver is obsolete, and KEPT
+  - Scoped down from the plan's "retire": the driver still works. It is the
+    fallback if the workflow hits something on the cluster and the way an older
+    run is reproduced; deleting it ends both, and keeping it costs nothing.
+  - Obsolete for one reason no care inside it can fix: **it submits all twenty
+    steps as ONE job sized for the heaviest**, so step 20's plots hold
+    cistarget's cores and memory for hours. Plus `.cfgsha` hashes CONFIG not
+    CODE (a changed script stays "fresh"), no intra-DAG parallelism, and no
+    report or provenance bundle.
+  - A header block and a runtime notice on every invocation -- PRINTED, not
+    fatal, since an error would break the fallback it exists to be. Both carry
+    the flag conversions.
+  - quickstart F and G rewritten around `scenicplus.run.sh`; RUNBOOK section 4
+    rewritten with the driver demoted to a subsection.
+  - **Section 5's table is now GENERATED from the sources** -- outputs from the
+    resolved DAG, reservations from RULE_TIERS, measurements from
+    measured_resources.tsv. It listed `results/` sentinels, which is the
+    driver's layout, and would have drifted again at the next tier change.
+  - **Two of my own defects, found by checking rather than writing.** The
+    runner's header still claimed "increment I0 ... no step rules to schedule
+    yet". And `--help` printed a HARDCODED `sed -n '2,26p'`, so rewriting that
+    header truncated the help mid-sentence with nothing to notice it -- help is
+    now derived from the comment block and cannot be cut by an edit above it.
+  - The plan's stated gate ("the runner is the only entry point") is
+    deliberately NOT met. Deletion stays a one-line follow-up.
+
 Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
 2026-09-09; artifacts not inspected here). The PARAMETERS have never been
 examined: the topic-count sweep, the DAR thresholds and the search-space width
