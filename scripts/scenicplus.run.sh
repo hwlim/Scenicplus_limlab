@@ -22,9 +22,16 @@
 # driver: a bad environment would otherwise be discovered once per rule, in
 # twenty separate jobs, each after its own queue wait.
 #
-# STATUS: increment I0. `--lsf` uses profiles/lsf via the cluster-generic
-# executor, which is proven on CCHMC but has no step rules to schedule yet. I5
-# is where the per-rule resource numbers arrive.
+# STATUS: this is THE way to run the pipeline. All 21 rules exist, each with a
+# measured per-rule reservation, and `--lsf` schedules them individually through
+# profiles/lsf -- validated on CCHMC 2026-09-12, nothing over its reservation
+# and nothing pending. A run ends with report.html, which `rule all` targets, so
+# it is not finished until it is readable.
+#
+# `scenicplus_run_pipeline.sh` still works and is no longer the path to take:
+# it submits all twenty steps as ONE job sized for the heaviest, so step 20's
+# few plots hold cistarget's cores and memory for hours. It is kept as a
+# fallback and for reproducing older runs. See quickstart.md.
 # -----------------------------------------------------------------------------
 set -euo pipefail
 
@@ -57,7 +64,13 @@ while [[ $# -gt 0 ]]; do
         -l|--local)   LSF=0; shift;;           # already the default; explicit is fine
         --lsf)        LSF=1; shift;;
         --)           shift; break;;
-        -h|--help)    sed -n '2,26p' "$0"; exit 0;;
+        # DERIVED, not a line range. `sed -n '2,26p'` printed the header up
+        # to a hardcoded line, and editing that header truncated --help
+        # mid-sentence with nothing to notice it. Print the leading comment
+        # block: everything from line 2 until the first line that is not a
+        # comment, which is what the block IS.
+        -h|--help)    awk 'NR>1 && /^#/ {print} NR>1 && !/^#/ {exit}' "$0"
+                      exit 0;;
         *) echo "[scenicplus.run] unknown arg: $1" >&2; exit 2;;
     esac
 done

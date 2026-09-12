@@ -1,5 +1,37 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
+# OBSOLETE. Use `scenicplus.run.sh`, the Snakemake runner.
+#
+# This driver still works, is still correct, and is deliberately NOT deleted:
+# it is the fallback if the workflow hits something on the cluster, and it is
+# how an older run is reproduced. But it should not be the path anyone takes for
+# new work, for one reason that no amount of care here can fix.
+#
+# IT SUBMITS ALL TWENTY STEPS AS ONE JOB, sized for the heaviest. Step 20 draws
+# a few plots holding cistarget's 16 cores and its memory, for hours. The
+# workflow schedules each rule separately against a MEASURED reservation --
+# 4 GB for the report, 256 GB for cistarget -- validated on CCHMC 2026-09-12
+# with nothing over its reservation and nothing left pending.
+#
+# Three more things it cannot do, each of which cost a real run here:
+#   * its `.cfgsha` resume hashes CONFIG, not CODE, so a step whose SCRIPT
+#     changed is still "fresh" -- that is how a `tag_cells=False` fix reached no
+#     workspace. Snakemake's `code` trigger covers it.
+#   * it cannot run independent stages at once; cistarget and dem are serial
+#     here and parallel there.
+#   * it produces no report.html and no provenance bundle. The workflow targets
+#     the report, so a run is not finished until it is readable, and brackets
+#     itself with a bundle that records the commit captured at ONSTART.
+#
+# Equivalences, if you are converting a habit:
+#   scenicplus_run_pipeline.sh --dry-run   ->  scenicplus.run.sh -n
+#   scenicplus_run_pipeline.sh --from 7    ->  scenicplus.run.sh -f 7
+#   scenicplus_run_pipeline.sh --force     ->  scenicplus.run.sh -- --forceall
+#   scenicplus_run_workstation.sh          ->  scenicplus.run.sh -j <cores>
+#   scenicplus_run_lsf.sh                  ->  scenicplus.run.sh --lsf -j 20
+#
+# quickstart.md follows the workflow; RUNBOOK section 4 has both.
+# -----------------------------------------------------------------------------
 # Master driver for the SCENIC+ pipeline.
 #
 # Replaces snakemake (including SCENIC+'s former inner snakemake, now flattened
@@ -22,6 +54,19 @@
 #   scenicplus_run_pipeline.sh --force            # force re-run everything
 # -----------------------------------------------------------------------------
 set -euo pipefail
+
+# Printed, not fatal. Making this an error would break the fallback it exists to
+# be, and would break reproducing an older run -- both of which are the reasons
+# the driver is kept at all.
+cat >&2 <<'DEPRECATED'
+[scenicplus] NOTE: this bash driver is OBSOLETE. Prefer: scenicplus.run.sh
+[scenicplus]   It submits all 20 steps as ONE job sized for the heaviest, so the
+[scenicplus]   plotting step holds cistarget's cores and memory for hours. The
+[scenicplus]   Snakemake runner sizes each rule from a measurement, and ends
+[scenicplus]   with report.html and a provenance bundle.
+[scenicplus]   --dry-run -> -n   |   --from N -> -f N   |   --force -> -- --forceall
+[scenicplus] Continuing anyway; this driver is kept as a fallback.
+DEPRECATED
 
 if [[ -z "${SCENICPLUS_PATH:-}" ]]; then
     echo "[scenicplus_run_pipeline] ERROR: SCENICPLUS_PATH is not set." >&2
