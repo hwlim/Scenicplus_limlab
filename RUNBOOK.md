@@ -557,7 +557,7 @@ or fail on the R + Seurat + Signac layer.
 
 ## 7. What has actually been run, and where
 
-Updated 2026-09-09.
+Updated 2026-09-12.
 
 | | status |
 |---|---|
@@ -571,10 +571,11 @@ Updated 2026-09-09.
 | **Per-rule LSF resources (I5)** | **VALIDATED on the cluster 2026-09-12**: full 21-rule run, nothing over its reservation, nothing killed, nothing pended -- including the 256000 MB R09 asks for, which was the one unchecked assumption. Confirmed as the new code by R21's epilogue reading `Total Requested Memory: 4000.00 MB`, matching its tier. Every tier is now measured; cistarget's 1.9x is the tightest and should stay |
 | **`report.html` (I6)** | **built 2026-09-11; rendered once for real, one defect found and fixed.** `rule all` targets it, so a run is not finished until it is readable. The real render flagged the report's OWN log as empty -- a false alarm on every run, since `tee` creates it before this script prints; the row is now annotated and excluded. Otherwise gated only against a synthetic workspace (`tests/report_render.sh`, deliberately PARTIAL, asserting what the page says is MISSING) |
 | **Provenance bundle (I7)** | **VALIDATED on the cluster 2026-09-12**: a bundle was created on a real run. Its behaviour on a FAILED run is still only locally gated -- the real proof is the next failure producing a bundle that explains itself |
-| **Retiring the bash driver (I8)** | **HELD 2026-09-12, deliberately.** Nothing built since I3 has completed a cluster run on the current code, so deleting the driver would remove the fallback before the replacement is proven. One end-to-end run settles I5's tiers, R21's tier, I6's report, I7's bundle and the three new figures at once. Before it: confirm a node has the 256000 MB R09 reserves, or the job pends rather than fails |
+| **Retiring the bash driver (I8)** | **LANDED 2026-09-12, as deprecation rather than deletion.** The hold was lifted by the full cluster run above, which settled I5's tiers, R21's tier, I6's report, I7's bundle and the three new figures at once. The driver still works and prints an obsolescence notice; deletion stays a one-line follow-up |
 | reproducibility | `PYTHONHASHSEED` and the BLAS thread variables must be pinned, or two runs of the same data DISAGREE -- by eRegulon membership, not just by bytes. The workflow pins them for every rule; a `run.sh` driving the bash pipeline must export them itself (Quickstart G) |
 | `input.reduction` | **confirmed on the cluster 2026-09-09**: a named reduction produces the figure it names. The `--only 20` redraw of a finished run is the exercised path |
-| submission | cluster runs through 2026-09-11 used `scenicplus_run_lsf.sh`, driven by a per-workspace `run.sh`. The 2026-09-12 run used `scenicplus.run.sh --lsf`, which is now the path ([quickstart.md](quickstart.md) section F). `scenicplus_run_lsf_cchmc.sh` has never been in use |
+| submission | cluster runs through 2026-09-11 used `scenicplus_run_lsf.sh`, driven by a per-workspace `run.sh`. The 2026-09-12 run used `scenicplus.run.sh --lsf` ([quickstart.md](quickstart.md) section F). `scenicplus_run_lsf_cchmc.sh` has never been in use |
+| **orchestrator as its own LSF job** | **IN USE on CCHMC, reported by the operator 2026-09-12.** `--lsf` submits the RULES; snakemake itself stays in the calling shell, so a dropped session halts the run halfway with no error. The working pattern is a small `#BSUB` wrapper that sets up the environment and invokes `scenicplus.run.sh --lsf` inside the job. `scripts/scenicplus.bsub.sh` is that pattern, generalised into a template with its site values kept as the example — the pattern is tested, this file is the tidied copy of it |
 | driver sentinel/cascade logic | validated by simulation, then in practice — a `grn.*` edit re-ran 12–20 and skipped 1–11 |
 
 **Outputs that have been looked at,** as opposed to merely produced:

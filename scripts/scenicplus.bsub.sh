@@ -24,6 +24,11 @@
 # the #BSUB lines. `bsub scenicplus.bsub.sh` would treat it as a command and
 # ignore every directive below, giving the queue's defaults instead.
 #
+# STATUS: this pattern is IN USE on the CCHMC cluster and is how the operator
+# has been running the pipeline. The file is that working script generalised --
+# the site values below are the real ones, kept as the example rather than
+# replaced with placeholders, because CCHMC is the only site this has run at.
+#
 # THE DRIVER JOB IS NOT A COMPUTE JOB. Two cores and 16 GB is generous for a
 # process whose work is polling; the real memory and cores are reserved by the
 # rules it submits, per `RULE_TIERS` in rules/common.smk. What it does need is
