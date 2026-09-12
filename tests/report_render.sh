@@ -109,12 +109,17 @@ Job was executed on host(s) <16*bmi-200m5-03>, in queue <normal>, as user <x>
     Max Threads :                                1332
 LSF
 printf 'ran fine\n' > "$WS/logs/R01_seurat_export.log"
-: > "$WS/logs/R20_visualize.log"          # empty on purpose
+: > "$WS/logs/R20_visualize.log"          # empty on purpose -- a REAL alarm
+# The report's own log, empty exactly as it is on a real run: `tee` creates it
+# when the job starts and this script's output arrives only after the page is
+# written. It must NOT be reported as an empty log.
+: > "$WS/logs/R21_report.log"
 
 # --- render ------------------------------------------------------------------
 OUT="$WS/report.html"
 python3 "$GEN" --workspace "$WS" --config "$WS/config/config.yaml" \
     --out "$OUT" --pipeline "$ROOT" --head-rows 10 --max-embed-mb 1 \
+    --self-log "$WS/logs/R21_report.log" \
     >"$WORK/stdout" 2>"$WORK/stderr"
 rc=$?
 [[ $rc -eq 0 ]] && say ok "the generator exits 0" \
@@ -146,6 +151,21 @@ has "the summary row still reports it absent"     "absent"
 has "...and marked as missing"                    "Not in this run"
 has "an absent figure family is reported"         "figure 02_"
 has "an empty log is called out"                  "R20_visualize.log"
+
+# The report's OWN log is empty on every real run: tee creates it at job start
+# and this script prints afterwards. Reporting it would be a false alarm every
+# single time, and a check that cries wolf is one people learn to skip.
+# BOTH directions, because either alone is satisfiable the wrong way --
+# suppressing the alarm entirely passes the first, alarming on everything passes
+# the second.
+alarm="$(grep -o 'Empty log(s):</strong>[^<]*' "$OUT" || true)"
+if grep -q 'R20_visualize.log' <<<"$alarm" && ! grep -q 'R21_report.log' <<<"$alarm"; then
+    say ok "the report's own log is excluded from the empty-log alarm"
+else
+    say FAIL "the empty-log alarm is wrong: [$alarm]"
+fi
+has "...and the page explains why it reads as 0 bytes" "written after this page"
+has "...naming the mechanism, not just asserting it"   "cannot describe that run"
 
 # --- 3. the assembly mismatch, which is the one real alarm -------------------
 has "an assembly mismatch is raised loudly"       "Assembly mismatch"

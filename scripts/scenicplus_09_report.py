@@ -427,21 +427,55 @@ def sec_config(cfg_path):
     return "\n".join(out)
 
 
-def sec_logs(logs_dir, ws):
+def sec_logs(logs_dir, ws, self_log=None):
+    """The run's logs, and which of them are suspiciously empty.
+
+    THE REPORT'S OWN LOG IS ALWAYS EMPTY HERE, and that is not a finding. The
+    rule pipes through `tee`, so the file exists from the moment the job starts
+    and receives this script's output only as it is printed -- which happens
+    AFTER the page has been built and this directory read. Reported as an empty
+    log it is a false alarm on every single run, and a check that cries wolf
+    every time is one people learn to skip.
+
+    So it is separated rather than suppressed: the row is annotated, the alarm
+    excludes it, and the page says why. Suppressing it silently would be the
+    other error -- a reader who counts the rules and finds one log unaccounted
+    for deserves the explanation in the page, not in the source.
+
+    This is the same shape as the sibling repo's "an artifact written DURING a
+    run cannot describe that run completely", where a report's own missing log
+    was once reported as evidence the run had been local.
+    """
     out = ["<h2 id=logs>Logs</h2>"]
     if not os.path.isdir(logs_dir):
         return "\n".join(out) + missing(logs_dir)
     files = sorted(f for f in os.listdir(logs_dir) if f.endswith(".log"))
     if not files:
         return "\n".join(out) + missing("any .log in " + logs_dir)
-    rows = []
+    self_name = os.path.basename(self_log) if self_log else None
+    rows, empty, self_seen = [], [], False
     for f in files:
-        p = os.path.join(logs_dir, f)
-        st = os.stat(p)
+        st = os.stat(os.path.join(logs_dir, f))
+        is_self = (f == self_name)
+        note = ""
+        if is_self:
+            self_seen = True
+            note = "this rule's own log \u2014 written after this page"
+        elif st.st_size == 0:
+            empty.append(f)
         rows.append([f, f"{st.st_size:,}",
-                     dt.datetime.fromtimestamp(st.st_mtime).strftime("%m-%d %H:%M")])
-    out.append(table_html(["Log", "Bytes", "Modified"], rows, limit_note=False))
-    empty = [r[0] for r in rows if r[1] == "0"]
+                     dt.datetime.fromtimestamp(st.st_mtime).strftime("%m-%d %H:%M"),
+                     note])
+    out.append(table_html(["Log", "Bytes", "Modified", "Note"], rows,
+                          limit_note=False))
+    if self_seen:
+        out.append(f'<p class="note"><code>{esc(self_name)}</code> reads as '
+                   f'0 bytes above and is NOT counted as an empty log. The rule '
+                   f'pipes through <code>tee</code>, so the file exists from the '
+                   f'start of the job and receives this script\u2019s output only '
+                   f'after the page has been written \u2014 an artifact written '
+                   f'during a run cannot describe that run completely. Read it on '
+                   f'disk afterwards for the real contents.</p>')
     if empty:
         out.append(f'<div class="miss"><strong>Empty log(s):</strong> '
                    f'{esc(", ".join(empty))}. A rule that wrote nothing at all '
@@ -449,7 +483,7 @@ def sec_logs(logs_dir, ws):
     return "\n".join(out)
 
 
-def build(ws, cfg_path, repo, head_rows, max_bytes):
+def build(ws, cfg_path, repo, head_rows, max_bytes, self_log=None):
     try:
         import yaml
         cfg = yaml.safe_load(open(cfg_path)) or {}
@@ -462,7 +496,7 @@ def build(ws, cfg_path, repo, head_rows, max_bytes):
         sec_tables(j("5.analysis", "tsv"), head_rows),
         sec_figures(j("5.analysis", "plots"), ws, max_bytes),
         sec_compute(j("logs", "lsf")),
-        sec_logs(j("logs"), ws),
+        sec_logs(j("logs"), ws, self_log),
         sec_config(cfg_path),
     ]
     toc = """<div class="toc"><strong>On this page</strong><ul>
@@ -498,9 +532,16 @@ def main():
     ap.add_argument("--max-embed-mb", type=float, default=4.0,
                     help="embed a PNG up to this size; link it above "
                          "[%(default)s]")
+    # Passed by the rule as {log}. Not guessed from the rule name: the report
+    # must not depend on a naming convention it cannot see, and being wrong here
+    # means either a false empty-log alarm every run or a real one suppressed.
+    ap.add_argument("--self-log", default=None, metavar="PATH",
+                    help="this rule's own log. It is always empty while the "
+                         "page is being built, so it is annotated rather than "
+                         "reported as an empty log.")
     a = ap.parse_args()
     html_text = build(a.workspace, a.config, a.pipeline or ".",
-                      a.head_rows, a.max_embed_mb * 1e6)
+                      a.head_rows, a.max_embed_mb * 1e6, a.self_log)
     os.makedirs(os.path.dirname(os.path.abspath(a.out)) or ".", exist_ok=True)
     with open(a.out, "w") as fh:
         fh.write(html_text)

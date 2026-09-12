@@ -780,8 +780,33 @@ otherwise reads as a second problem rather than the expected consequence of the
 first. The logs are what a partial run leaves behind, and the provenance bundle
 at I7.
 
+**The report's OWN log is annotated, not alarmed on.** Found by reading the
+first real report: R21's log showed as an empty log, which is a false alarm on
+every single run. The rule pipes through `tee`, so the file exists from the
+moment the job starts and receives this script's output only AFTER the page has
+been built and `logs/` read. The rule now passes `{log}` as `--self-log`; that
+row is labelled *written after this page*, excluded from the empty-log alarm,
+and the page explains the mechanism.
+
+Separated rather than suppressed, and both halves are asserted. Suppressing it
+silently is the other error: a reader who counts the rules and finds one log
+unaccounted for deserves the explanation in the page. The gate checks BOTH
+directions, because each alone is satisfiable the wrong way -- dropping the
+alarm entirely passes "the own log is not listed", and alarming on everything
+passes "a real empty log is listed". Three mutations turn it red: ignore
+`--self-log`, suppress every empty log, keep the row note but drop the
+explanation.
+
+Same shape as the sibling repo's *an artifact written DURING a run cannot
+describe that run completely*, where a report's own missing log was once
+reported as evidence the run had been local. Second time this has been paid for;
+now it is a check.
+
 **Not run on a cluster.** `report.html` has never been produced from a real
-`5.analysis/`; every check above is against a synthetic workspace.
+`5.analysis/`; every check above is against a synthetic workspace. The empty-log
+false alarm above is the exception -- it was found by an operator reading a real
+report, which is exactly the class of defect a synthetic fixture does not
+produce.
 
 ---
 
