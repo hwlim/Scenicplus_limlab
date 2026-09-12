@@ -595,6 +595,60 @@
   - No bundle from a real GRN run yet. The local runs are real snakemake
     invocations, but they fail on stand-in files, not on science.
 
+20260912: model-selection figures -- the sweep stops being a number with no evidence
+  - First of three report figures proposed from the SCENIC+ paper's Fig 2, and
+    picked first because it SURFACES WORK ALREADY DONE rather than adding any.
+  - `evaluate_models` computes four metrics across every topic count and picks
+    the optimum from them. Step 04 passed `plot=False`, so all of it was thrown
+    away: the number every downstream region set derives from arrived with
+    nothing behind it, from the most expensive step in the workflow.
+  - `QC/topic_model_selection.{pdf,png}` + four per-metric panels; the report
+    grew a *Model selection* section. QC/ because the stage map already reads
+    "model selection, cell and region counts per stage".
+  - **Captured AND `save=`d.** The library builds the figure regardless of
+    `plot` and `plot=False` merely CLOSES it, so `plot=True` is passed purely to
+    stop it closing what we are about to save -- under Agg `plt.show()` is a
+    no-op. Both halves asserted, since the design is the difference.
+  - **Asked whether the multi-page PDF alone would do, and MEASURED it.** A
+    workspace holding only that file renders zero images, zero links, and
+    "Not in this run ... the sweep ran before step 04 drew them" -- the report
+    would claim the figures were never drawn with the evidence beside it. Two
+    causes, one a choice (the report globs PNGs) and one not (a browser cannot
+    inline a multi-page PDF in an `<img>`). So both forms are kept: per-figure
+    for the report, `topic_model_selection_all_pages.pdf` to page through.
+    That is also the real argument for the one-plot-per-file contract, which I
+    had read as house style -- it is what makes an artifact showable.
+  - **The report embeds ONE figure and names the rest.** Five near-identical
+    line plots is more page than a QC detail earns. Which one is "combined" is
+    decided structurally (a panel's stem extends it), not by filename -- and I
+    wrote the prefix test backwards first, so it showed a panel and dropped the
+    combined plot. Caught because the gate asserts WHICH figure appears.
+  - **Names come from each figure's axes TITLE**, not from argument order --
+    which would mislabel a metric rather than fail. The titles carry the
+    direction too, so `mimno_2011_maximize` says which way is better without
+    opening it. Better than the hardcoded list I first wrote, and my own
+    assertion was what caught the difference.
+  - **Only the combined figure is DECLARED.** The four panel names belong to
+    pycisTopic; declaring them would make an upstream wording change a
+    MissingOutput on the priciest rule. The combined name is ours, and requiring
+    it is what catches a sweep that drew nothing.
+  - Gated by `tests/model_selection_plot.py` (17 checks): drives the REAL
+    `evaluate_models` against stand-in models -- it reads only `.n_topic` and
+    `.metrics`, verified by reading the function -- so no LDA is fitted. Opens
+    what was written (PNG IHDR dimensions, PDF page count) rather than checking
+    a path exists, because `savefig` writes a file whether or not anything was
+    drawn. Cross-file name check too, the stem now being a literal in both the
+    script and prepare.smk. Three mutations, all caught.
+  - **The cost is real**: a new declared output on R04 means every existing
+    workspace re-runs topic modelling to get the figure -- the 78-minute step.
+    No cheaper path exists; the models live only inside that rule. Batch it with
+    the next real run.
+  - Still candidates, not started: the eRegulon-AUC t-SNE (data is in the MuData
+    as `*_gene_based_AUC` / `*_region_based_AUC`, but 1.0a2 dropped
+    `scenicplus.dimensionality_reduction`, so it is hand-rolled on scanpy) and
+    the region-overlap heatmap (`jaccard_heatmap` exists but takes the LEGACY
+    SCENICPLUS class, not MuData -- build it from R19's region lists instead).
+
 Status: end-to-end on human/hg38 small-scale PBMC, and on mouse (reported
 2026-09-09; artifacts not inspected here). The PARAMETERS have never been
 examined: the topic-count sweep, the DAR thresholds and the search-space width

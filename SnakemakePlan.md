@@ -887,6 +887,87 @@ produce.
 
 ---
 
+### Model-selection figures, 2026-09-12
+
+First of three report figures proposed from the SCENIC+ paper's Fig 2. This one
+first because it SURFACES WORK THE PIPELINE ALREADY DID rather than adding any.
+
+`evaluate_models` computes four metrics across every topic count in the sweep
+and picks the optimum from them. Step 04 passed `plot=False` and threw all of it
+away, so the single most consequential number in the run -- how many topics,
+which every downstream region set derives from -- arrived with no evidence
+behind it. The sweep is also the most expensive step in the workflow, so it was
+simultaneously the costliest and the least inspectable.
+
+`QC/topic_model_selection.{pdf,png}` plus four per-metric panels, and the report
+grew a *Model selection* section. QC/ rather than the analysis stage because the
+stage map already says so: *"model selection, cell and region counts per stage"*.
+
+**Captured AND `save=`d, which turned out to be the right answer to a question
+worth asking.** `evaluate_models(save=...)` writes ONE MULTI-PAGE PDF and no
+PNG. Asked whether keeping only that form would cost the report anything, and
+the answer, measured rather than argued: a workspace holding just that PDF
+renders ZERO images, ZERO links, and the message *"Not in this run ... the sweep
+ran before step 04 drew them"* — the report would claim the figures were never
+drawn with the evidence sitting beside it. Two reasons, and only one is a
+choice: the report finds figures by globbing PNGs (mine, reversible), and a
+browser cannot inline a multi-page PDF in an `<img>` at all (not mine). So the
+per-figure output is what the report shows, and the library's multi-page PDF is
+kept beside it as `topic_model_selection_all_pages.pdf` for paging through.
+
+That measurement is also the real argument for the one-plot-per-file contract in
+CLAUDE.md, which I had been reading as house style. It is load-bearing: it is
+what makes an artifact showable rather than merely stored.
+
+**The report embeds ONE figure and NAMES the rest.** Five near-identical line
+plots is more page than a QC detail earns, so the section shows the combined
+plot — the one that answers "was the optimum clear?" — and its caption points at
+the four panels and the all-pages PDF in `QC/`. Which figure is combined is
+decided STRUCTURALLY, not by filename: a panel's stem extends the combined one's,
+so the combined figure is the stem nothing else is built on. Written the other
+way round first, which selected a panel and dropped the combined plot; the gate
+asserts WHICH figure appears, not merely that one does, so it caught it.
+
+The output contract still holds for the part the report uses: one plot per file
+in both formats.
+It also builds the figure regardless of `plot` -- `plot=False` merely closes it
+-- so the figures are taken off pyplot afterwards and written individually.
+`plot=True` is passed for that reason alone: under Agg `plt.show()` is a no-op,
+and the flag's real effect here is "do not close what we are about to save".
+Both halves are asserted, because the design rests on the difference.
+
+**Names come from each figure's own axes TITLE.** `plot_metrics` emits four
+panels in an order this repo would otherwise have to assume, and an assumption
+there mislabels a metric rather than failing. The titles also carry the
+optimisation direction, so `mimno_2011_maximize` says which way is better
+without opening the file -- better than the hardcoded list I first wrote, and
+the gate now asserts it.
+
+**Only the combined figure is DECLARED.** The four panel names belong to
+pycisTopic, so declaring them would turn an upstream wording change into a
+MissingOutput failure on the most expensive rule in the pipeline. The combined
+name is ours, so requiring it is safe, and requiring it is what catches a sweep
+that finishes having drawn nothing. Same reasoning as the undeclared figures in
+`rules/report.smk`.
+
+**Gated by `tests/model_selection_plot.py`**, 17 checks, which drives the REAL
+`evaluate_models` against stand-in models -- it reads only `.n_topic` and
+`.metrics`, verified by reading the function -- so no LDA is fitted and no data
+is needed. It opens what was written rather than checking paths exist: PNG
+dimensions from the IHDR, PDF page count from the objects, because `savefig`
+produces a file whether or not anything was drawn. Cross-file check included,
+since the stem is now a literal in both the script and `prepare.smk` and drift
+between them is a MissingOutput at the end of an expensive rule. Mutation-tested
+three ways.
+
+**THE COST, and it is not small.** This adds a declared output to R04, so every
+existing workspace re-runs topic modelling to get the figure -- the 78-minute
+step, and the one whose reservation matters most. There is no cheaper path: the
+models exist only inside that rule. Worth batching with the next real run rather
+than triggering on its own.
+
+---
+
 ## Traps to carry across, not rediscover
 
 Each of these cost a real run in one repo or the other:
