@@ -161,9 +161,15 @@ def region_overlap(meta, out_dir, source, top_n):
     df.to_csv(out_dir / f"09_region_overlap_{source}.tsv", sep="\t")
 
 
-def make_eRegulon_adata(md):
+def make_eRegulon_adata(md, kind="gene"):
+    """Cells x eRegulons AUC, direct and extended side by side.
+
+    `kind` selects the feature space: "gene" for target-gene enrichment,
+    "region" for target-region. Defaulted to "gene" so the existing per-eRegulon
+    UMAP callers are unchanged.
+    """
     parts = []
-    for k in ["direct_gene_based_AUC", "extended_gene_based_AUC"]:
+    for k in [f"direct_{kind}_based_AUC", f"extended_{kind}_based_AUC"]:
         if k in md.mod:
             parts.append(md[k])
     if not parts:
@@ -171,6 +177,81 @@ def make_eRegulon_adata(md):
     a = ad.concat(parts, axis=1, merge="unique")
     a.obs = md.obs.loc[a.obs_names]
     return a
+
+
+def eregulon_tsne(md, ct_col, out_dir, kind, seed):
+    """t-SNE of CELLS in eRegulon-activity space, coloured by cell type.
+
+    The paper's Fig 2 view, and the only figure here drawn on a layout of its
+    own: every other one uses the Seurat reduction that became `X_umap`. That
+    is the point of it -- if cell types separate on eRegulon activity alone,
+    the regulons carry the identity, which is a claim the UMAP cannot make
+    because the UMAP was computed from expression.
+
+    IT IS ALSO WHY THE CAPTION MUST SAY SO. A reader who has scrolled past six
+    figures on one layout will read a seventh as the same coordinates unless
+    told otherwise, and `input.reduction` has already cost this project a run
+    for exactly that class of confusion.
+
+    SEEDED FROM `resources.seed`. t-SNE is stochastic, and an unseeded one here
+    would quietly undo the reproducibility the pinning work established: two
+    runs of the same data would differ in a figure while every table matched.
+    The rule tracks that key so changing it redraws.
+    """
+    a = make_eRegulon_adata(md, kind=kind)
+    if a is None or a.n_obs < 10 or a.n_vars < 2:
+        print(f"[viz] {kind}-based t-SNE skipped: "
+              f"{'no AUC modality' if a is None else f'{a.n_obs} cells x {a.n_vars} eRegulons'}")
+        return
+    if ct_col not in a.obs.columns:
+        print(f"[viz] {kind}-based t-SNE skipped: no '{ct_col}' in cell metadata")
+        return
+
+    import numpy as np
+    import matplotlib.patheffects as pe
+    import scanpy as sc
+    # sklearn REQUIRES perplexity < n_samples, and raises rather than adjusting.
+    # A focused celltype_scope can leave few cells, so clamp instead of failing
+    # a whole rule over a plotting parameter.
+    perp = max(5.0, min(30.0, (a.n_obs - 1) / 3.0))
+    b = a.copy()
+    sc.pp.pca(b, n_comps=min(50, b.n_vars - 1, b.n_obs - 1))
+    sc.tl.tsne(b, use_rep="X_pca", perplexity=perp, random_state=seed)
+
+    xy = b.obsm["X_tsne"]
+    labels = b.obs[ct_col].astype(str)
+    order = sorted(labels.unique())
+    cmap = plt.get_cmap("tab20")
+    fig, ax = plt.subplots(figsize=(8, 7))
+    for i, lab in enumerate(order):
+        m = (labels == lab).to_numpy()
+        ax.scatter(xy[m, 0], xy[m, 1], s=4, linewidths=0,
+                   color=cmap(i % 20), label=lab)
+    # LABEL EACH CLUSTER IN PLACE, not only in the legend. tab20 repeats after
+    # 20 and its adjacent hues are already hard to tell apart -- the sibling
+    # repo hit exactly this at 27 labels, where the legend became "the lookup it
+    # exists to save". A name at the cluster's median position is readable
+    # without matching colours at all, so the legend becomes a fallback for
+    # clusters too small or too overlapped to carry text.
+    for i, lab in enumerate(order):
+        m = (labels == lab).to_numpy()
+        cx, cy = np.median(xy[m, 0]), np.median(xy[m, 1])
+        ax.text(cx, cy, lab, fontsize=7, ha="center", va="center",
+                color="black", zorder=5,
+                path_effects=[pe.withStroke(linewidth=2.2, foreground="white")])
+    ax.set_xlabel("t-SNE 1")
+    ax.set_ylabel("t-SNE 2")
+    ax.set_title(f"Cells in {kind}-based eRegulon activity space\n"
+                 f"{a.n_obs:,} cells x {a.n_vars} eRegulons, perplexity {perp:g}, "
+                 f"seed {seed}", fontsize=10)
+    # Legend outside: with 25 cell types it otherwise covers the cloud it
+    # describes -- measured on the PBMC fixture, which has exactly that many.
+    ax.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), frameon=False,
+              markerscale=3, fontsize=7,
+              ncol=1 if len(order) <= 22 else 2)
+    stem = "11_tsne_eRegulon_gene_based" if kind == "gene" \
+        else "12_tsne_eRegulon_region_based"
+    save(fig, out_dir, stem)
 
 
 def attach_embedding(adata, emb_dir, reduction):
@@ -420,6 +501,9 @@ def main():
     extended = md.uns.get("extended_e_regulon_metadata", pd.DataFrame())
     combined = pd.concat([direct, extended], ignore_index=True) \
         if (len(direct) + len(extended)) else pd.DataFrame()
+    seed = int(cfg.get("resources", {}).get("seed", 555))
+    eregulon_tsne(md, celltype_col, out_dir, "gene", seed)
+    eregulon_tsne(md, celltype_col, out_dir, "region", seed)
     region_overlap(direct, out_dir, "direct", viz.get("overlap_top_n", 40))
     region_overlap(extended, out_dir, "extended", viz.get("overlap_top_n", 40))
     tf_target_count(combined, out_dir, top_n=40)

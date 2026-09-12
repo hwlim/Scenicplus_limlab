@@ -101,8 +101,12 @@ rule R20_visualize:
         mem_mb=mem("R20_visualize"),
         runtime=rt("R20_visualize"),
     params:
+        # resources.seed is tracked because the eRegulon t-SNE is STOCHASTIC.
+        # Without it, changing the seed would leave the figure untouched and
+        # snakemake would report nothing to do -- a silent no-op of exactly the
+        # kind the sibling repo just spent an increment removing.
         cfg=cfg_params("input.celltype_column", "input.reduction",
-                       "visualization"),
+                       "visualization", "resources.seed"),
         config_file=CONFIG_FILE,
         out_dir=PLOTS,
         embedding_dir=EXPORT_DIR,

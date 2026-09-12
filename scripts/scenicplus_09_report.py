@@ -72,6 +72,17 @@ FIGURE_ORDER = [
      "motif matched by a family. The block structure is the read; the matrix "
      "is in the .tsv beside the figure."),
     ("10_", "Target-region overlap, extended", ""),
+    ("11_", "Cells in eRegulon activity space, target genes",
+     "THE ONLY FIGURE HERE ON ITS OWN LAYOUT. Every other one is drawn on the "
+     "Seurat reduction; this is a t-SNE of the cells in eRegulon ACTIVITY "
+     "space, so the coordinates are not comparable with anything above. If the "
+     "cell types separate here, the regulons carry the identity -- which the "
+     "UMAP cannot show, having been computed from expression. Stochastic, and "
+     "seeded from resources.seed."),
+    ("12_", "Cells in eRegulon activity space, target regions",
+     "The same view over region-based enrichment. Agreement between this and "
+     "the gene-based one is the interesting part: the two feature spaces are "
+     "independent evidence for the same regulon."),
 ]
 
 # Tables R19 declares. Everything else it writes is gated upstream and may

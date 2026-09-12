@@ -1033,6 +1033,66 @@ printed `ok`, and could not fail anything.
 
 ---
 
+### Cells in eRegulon activity space, 2026-09-12
+
+Third and last of the Fig 2 candidates. `11_tsne_eRegulon_gene_based` and
+`12_tsne_eRegulon_region_based`: a t-SNE of the CELLS over eRegulon AUC,
+coloured by the cell type from the input Seurat object.
+
+**The only figure in the report drawn on its own layout**, and the caption says
+so. Every other one uses the Seurat reduction that became `X_umap`. That is the
+point of this one: if cell types separate on eRegulon activity alone, the
+regulons carry the identity — a claim the UMAP cannot make, having been computed
+from expression. It is also why the caption is not optional. A reader who has
+scrolled past six figures on one layout will read a seventh as the same
+coordinates unless told otherwise, and `input.reduction` has already cost this
+project a run over that class of confusion.
+
+**Seeded from `resources.seed`, and R20 now TRACKS that key.** This is the only
+stochastic figure in the pipeline. Unseeded, it would quietly undo the
+reproducibility the pinning work established — two runs of the same data
+differing in a picture while every table matched. And without the config
+trigger, changing the seed would leave the figure untouched with snakemake
+reporting nothing to do: the silent no-op the sibling repo spent a whole
+increment removing, re-created here in a new rule.
+
+**Perplexity is clamped, not left to raise.** sklearn REQUIRES perplexity below
+the sample count and errors otherwise, and `input.celltype_scope` can
+legitimately leave few cells. A whole rule should not fail over a plotting
+parameter.
+
+**Clusters are labelled IN PLACE, not only in the legend.** The first render
+looked fine at twelve types, but `tab20` repeats after twenty and its adjacent
+hues are already hard to separate — the sibling repo hit exactly this at 27
+labels, where the legend "became the only way to read the figure, the lookup it
+exists to save". A name at each cluster's median position reads without matching
+colours at all, and the legend drops to a fallback for clusters too small to
+carry text.
+
+**Gated by `tests/eregulon_tsne.py`, 12 checks, and its centre is a SEED PAIR.**
+Same seed must give a byte-identical PNG; a different seed must give a different
+one. Either alone is satisfiable the wrong way: a function ignoring its input
+entirely passes the first, and one ignoring the seed passes neither but would
+still look perfectly fine in a picture. What is NOT tested is the embedding
+itself — that is sklearn's, and testing it would test sklearn.
+
+**`output_names.py` caught both new figures immediately**, including the one
+whose stem reaches `save()` through a variable. That is the extractor widened
+during candidate 2 earning its keep on the very next increment: the old version
+was structurally blind to exactly that shape.
+
+**Not done, and worth knowing.** `scenicplus.networks.create_nx_graph` returns a
+TRIPARTITE TF -> Region -> Gene graph with a concentric layout; the report's
+`08_eGRN_network` is hand-rolled and BIPARTITE, collapsing the region layer, so
+the enhancer carrying each link is not visible. `create_nx_tables` takes the
+legacy `SCENICPLUS` class, same as `jaccard_heatmap`, so reaching it from MuData
+would mean the trade declined for candidate 2. Options if it is ever wanted:
+build the tripartite graph from the same metadata, which already carries TF,
+Region and Gene per row, or add `export_to_cytoscape` so the network leaves the
+report for something interactive.
+
+---
+
 ## Traps to carry across, not rediscover
 
 Each of these cost a real run in one repo or the other:
