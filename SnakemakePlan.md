@@ -1297,6 +1297,176 @@ is the single unchecked assumption in I5.
 Only after that does I8 become what the plan says it is: a deletion and two
 document rewrites.
 
+### Two silent defects found by review, 2026-09-12
+
+Both were found by reading the code against its own arguments and against its
+own producer, not by any gate. Neither raised an error, and each had a test
+sitting next to it that could not see it.
+
+**1. R10 read a file it did not declare.** `scenicplus_06_grn_stage.py:167`
+appends `--genome_annotation` under `dem_balance_number_of_promoters`, which
+ships true, and `rules/grn.smk`'s R10 declared only the region sets, the
+database, the motifs and the script. The resolved DAG said
+`R10_dem depends on ['R05_region_sets']`, so `--forcerun R07_genome_annot`
+scheduled R07, R08, R13 and everything after — and NOT R10. The promoter
+balancing would keep using the old annotation while the search space used the
+new one: no error, different motifs. Ordering was luck rather than
+construction; R07 finishes seconds after R01 only because R10 waits on R04's
+78 minutes.
+
+The fix is `_dem_annotation()`, which declares the input only when the branch
+that reads it is on — an unconditional declaration would give the false setting
+a rerun trigger for a file dem never opens, re-running a 12.9 GB-database step
+whenever the genome pair moved.
+
+**Why this file's own header did not prevent it.** It says the dependencies are
+"taken from each stage's ARGUMENTS, not from the driver's ordering". They were,
+for every unconditional argument. This one is appended inside an `if`, and
+reading the argument list top to bottom skips it. A conditional argument is
+where an arguments-derived edge list goes wrong.
+
+**2. The Genome section's panels never rendered.** The report compared
+`input.assembly` to the record's `chr1_matches` with `==`. R07 writes
+`"hg38/GRCh38"` — one chromosome-1 length, both accepted spellings — against a
+config that says `hg38`. So the equality was false, both `not` branches were
+false, and a real report printed no panel at all: no confirmation, no warning,
+a section that reads as if it were never written. `assembly_agrees()` now knows
+that a `/` separates synonyms.
+
+While fixing it, a fourth branch: a genuine MISMATCH is REACHABLE, which the
+old comment denied. R07 gates chromosome 1 only for the assemblies in its own
+`EXPECTED_CHR1` (hg38 and mm10); for any other spelling it prints a note and
+continues. `assembly: hg19` over hg38 data therefore passes every check and
+reaches the report disagreeing, and now says so in red.
+
+**THE FIXTURE PATTERN CAME BACK, INSIDE THE COMMIT THAT DOCUMENTED IT.**
+`75af5ae` fixed the report reading key names the producer never writes, wrote
+the lesson into `tests/record_keys.py`, and then hand-wrote
+`"chr1_matches": "hg38"` into `tests/report_render.sh` — a VALUE the producer
+cannot emit. Names anchored on the producer, values still invented, and the
+assertion beside it reported CONFIRMED against fiction. Two gates close it:
+`tests/genome_checks.sh` renders the section from records the producer actually
+wrote, in all four situations, and `record_keys.py` now checks every
+`chr1_matches` literal in the suite against R07's own `KNOWN_CHR1`.
+
+**Gates, each proven able to fail before being trusted.** `dryrun.sh` gained
+the R10→R07 edge to check 7 and its absence under the false setting as 7c;
+removing the input made 7 report `['R05_region_sets']`, and making it
+unconditional made 7c fail. `genome_checks.sh` gained four cases;
+reintroducing `==` turned the confirmation case red, and restoring the original
+three-branch shape turned the panel COUNT red at zero, which is the shipped
+defect exactly. Restoring the invented fixture value turned `record_keys.py`
+red. Full local suite green afterwards: 8 of 8.
+
+### Four ways the run record described the wrong run, 2026-09-12
+
+Same review, second batch. These are not about what the pipeline computes —
+they are about whether the two artifacts that say what happened can be
+believed. Each one states something confidently and none of it was checkable
+from the artifact itself.
+
+**`lsf_jobs.tsv` was never scoped.** `scoped_logs()` took the run marker and
+the `lsf_accounting()` call two lines below passed no `since` at all. One
+function, two call sites, one of them scoped — the shape that function's own
+docstring warns about, in the same file. On any second run the table carried
+every earlier run's rows, and on the failed run the bundle exists for, that is
+a previous SUCCESSFUL run's numbers presented as this one's. Case 4 of the gate
+could not see it: it checks `logs/*.log`, and this is `logs/lsf/*.out`, read by
+a different function.
+
+Underneath it, an ordering bug: the parser iterated `sorted(os.listdir(...))`
+and let the last write win, so `R09_cistarget.11.out` lost to
+`R09_cistarget.9.out`. Lexicographic order puts the OLDER job last once a
+counter passes 9. Now ordered by mtime, because scoping only hides this — a
+rule snakemake retried inside one run has two files in scope.
+
+**The report read its own commit at render time.** R21 is the last rule of the
+run, on a compute node, hours after the start, against a shared install. That
+is the hazard `--mode start` was built to eliminate and its docstring says so;
+the report then made the finish-time call anyway, so the bundle and the report
+could name different commits for one run. The report is the artifact people
+open. Now read from `logs/.run_meta.json`, with a live read kept only as a
+fallback that labels itself as one.
+
+**Stale figures were presented as this run's.** Nothing clears
+`5.analysis/plots/`, and R20 legitimately skips figures — the t-SNE bails below
+ten cells, which `input.celltype_scope` can easily cause. The previous run's
+PNG survives under the same name, and the report globbed the directory,
+embedded it under the expected heading, and captioned the leftovers "Produced
+by this run". Now each figure says whether this run wrote it. **Labelled, not
+dropped**: after a partial rerun every figure is carried over and every one of
+them is still the right picture, so hiding them would trade one wrong answer
+for another.
+
+**A deliberate refusal was not an error signature.** The bundle's scan matched
+tracebacks and kill messages. A refusal — R07 catching GRCm39 under mm10, step
+08 catching barcodes that do not intersect — prints a tidy explanation and
+exits 1, tagged `[genome]` exactly like the progress line above it. So the
+manifest for a real refusal said no log carried a signature and pointed the
+reader at scheduling, away from the log holding the answer.
+
+Fixed at both ends. Every refusal now carries a `FATAL` marker, added by one
+`_fatal()` wrapper at each entry point rather than at each `sys.exit`, so a
+refusal written later is covered without anyone remembering to mark it. The
+scan also takes the LSF epilogue's non-zero `Exited with exit code`, which
+catches a job that died without printing anything recognisable. Matching the
+tag alone was never an option: the success path prints the same tag.
+
+**Every gate was proven able to fail before being trusted.** Five reverts, each
+turning exactly the intended check red and nothing else: the missing `since`,
+the old signature regex, the render-time git read, the unscoped figures, and a
+renamed filename constant. The figure check counts labels rather than grepping
+for one, because a label attached to every figure is as useless as none.
+
+### Documentation that contradicted the code, 2026-09-12
+
+Same review, third batch, and all one mistake: the documents kept describing
+the bash driver while the workflow did something else. Nothing fails, which is
+why they survived I8's documentation pass.
+
+**The "redraw in two minutes" recipe re-ran everything.** RUNBOOK section 5
+said to set `input.reduction` and then `-f 20`, on the reasoning that no stage
+in between reads a reduction. Three rules track the key, and R01's declared
+OUTPUT set contains `embedding_<name>.tsv` — the name is part of what that rule
+promises to produce. So the config edit above the recipe had already scheduled
+all 21 rules before `-f 20` was reached, R04's 78 minutes and R09's 256 GB
+included.
+
+**`-f N` names a rule, not a range.** It becomes `--forcerun R<NN>_*`, which
+re-runs that rule and its dependents. Four documents said "from step N onward"
+— the obsolete driver's semantics, and correct there, since it walks a line and
+compares numbers. Off the resolved DAG:
+
+| flag | also skipped | why |
+|---|---|---|
+| `-f 7` | R09 | cistarget reads only the region sets |
+| `-f 9` | R10, R13 | siblings of R09, not its children |
+| `-f 14` | R15, R17 | the extended branch runs in parallel |
+
+The conversion tables presented `--from N` and `-f N` as equivalent, so a
+converted habit leaves a stage untouched and the run still ends green.
+
+**`scenicplus_init.sh` sent new users to the obsolete driver** — the first
+instruction anyone received. Its `--help` also carried the same hardcoded line
+range I8 fixed in the runner, and had already grown past it. The README was
+worse, being the front door: "There is no snakemake", the driver's layout, and
+a setup step pointing at an `environment.yml` that RUNBOOK section 1 says does
+not produce a working environment. `CLAUDE.md` said "There is no snakemake
+anywhere" as well.
+
+**PROSE IS WHAT ROTS, SO THE GATE READS THE GRAPH.** `dryrun.sh` 7d derives the
+three fork examples from the resolved DAG and checks every document's claim
+against them; 7e RUNS the init script and reads its output rather than grepping
+its source. The first is not hypothetical maintenance: the R10 edge fix earlier
+the same day changed R07's skip set from `{R09, R10}` to `{R09}`, and any
+hand-written table would have been wrong from that commit onward.
+
+Two defects of mine, both caught by the new gate on its first run: the
+skip-list extractor called `int(x[1:])` on a regex group that had already
+captured the digits, so `R10` read as `0`; and changing the runner's message
+broke two existing assertions that quoted the old wording — the wording being
+wrong being the reason it changed.
+
 ---
 
 ## Traps to carry across, not rediscover
@@ -1313,6 +1483,37 @@ Each of these cost a real run in one repo or the other:
   there. The same class as `rusage[mem]` vs `-M` here.
 - **`additionalProperties: false`, and no `default:` in the schema.** Defaults
   in two places drift; the code's `.get()` defaults are the ones that run.
+- **A document that repeats a number or a shape will be wrong eventually.**
+  Derive it. Section 5's resource table comes from the DAG and the tier table;
+  the `-f N` fork examples come from the resolved graph and are checked against
+  the prose. Both were hand-written first and both had already drifted.
+- **A retired tool's semantics outlive it in the docs.** `--from N` really did
+  mean "step N or higher"; `-f N` never did. When a replacement takes over,
+  every conversion table is a claim of equivalence that nobody tested.
+- **One predicate, two call sites, one of them scoped.** Sharing the *function*
+  is not sharing the *behaviour* — the argument has to be passed at every call.
+  This shipped twice here: the report had no scoping while the bundle did, and
+  then the bundle's log scoping was right while its LSF accounting beside it
+  was not. Grep for the other callers whenever a scope argument is added.
+- **An artifact that reads its own identity LATE reads someone else's.** A
+  report rendered in the last rule of the run, on a shared install, must take
+  the commit from what was recorded at the start, never from a `git` call made
+  where it renders. Where a live read is kept as a fallback, label it as one.
+- **A directory nothing clears is not a record of this run.** Outputs
+  accumulate, steps skip legitimately, and the leftovers then look current
+  under the expected name. Scope by the run marker and SAY which side each file
+  fell on; do not silently drop, because a partial rerun makes carried-over the
+  normal case.
+- **A CONDITIONAL argument is a conditional EDGE.** Deriving a rule's inputs by
+  reading a stage's argument list misses the ones appended inside an `if`, and
+  the resulting missing edge is invisible: the rule still runs, just not when it
+  should. Declare it under the same condition, never unconditionally — that
+  trades a missing rerun for a spurious one.
+- **Anchoring a fixture's key NAMES on the producer does not anchor its
+  VALUES.** Both halves have now shipped wrong here, the second inside the
+  commit that fixed the first. If a fixture can be generated by running the
+  producer, generate it; where it cannot, check its literals against the
+  producer's own table as text.
 - **A step that exits 0 without its outputs.** Snakemake catches this for free
   (`MissingOutputException`) — which is precisely how upstream #611 saw the
   chromsizes bug that our exit-0 driver could not. Declare every output,

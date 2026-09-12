@@ -3,15 +3,28 @@
 A 20-step pipeline that runs SCENIC+ end-to-end on a single Seurat `.rds`
 multiome object (RNA + peaks/ATAC) and produces:
 
-- `results/tables/` — comprehensive TSVs of TF-region-gene links, AUC, RSS, TF summary
-- `results/plots/` — interpretable PDF + PNG plots (one per file)
-- `results/scplus_out/scplusmdata.h5mu` — the canonical SCENIC+ MuData
+- `5.analysis/tsv/` — comprehensive TSVs of TF-region-gene links, AUC, RSS, TF summary
+- `5.analysis/plots/` — interpretable PDF + PNG plots (one per file)
+- `4.grn/scplusmdata.h5mu` — the canonical SCENIC+ MuData
+- `report.html` — the run, readable: provenance, genome check, tables, every
+  figure, this run's LSF accounting and logs
+- `provenance/<timestamp>_<status>/` — a bundle written on success AND failure
 
-The pipeline is driven by a plain bash master script (`scenicplus_run_pipeline.sh`) that
-walks the steps sequentially, skipping any step whose output is up-to-date
-relative to the input artifacts and the relevant slice of `config.yaml`. There
-is no snakemake: SCENIC+'s GRN inference (steps 06-18) runs as discrete
-`scenicplus` CLI stages, each with its own sentinel-based resume.
+**A Snakemake workflow runs it, and `scenicplus.run.sh` is the entry point.**
+Each of the 21 rules is scheduled separately with its own measured LSF
+reservation, so the plotting step no longer holds the motif-enrichment step's
+sixteen cores and 256 GB. `rule all` targets `report.html`, so a run is not
+finished until it is readable.
+
+SCENIC+'s own GRN inference (steps 06-18) was flattened out of its opaque inner
+snakemake into discrete `scenicplus` CLI stages, one rule each, dispatched by
+`scenicplus_06_grn_stage.py`.
+
+`scenicplus_run_pipeline.sh`, the original bash driver, still works and prints
+an obsolescence notice. It is kept as a fallback and for reproducing older
+runs. Do not start there: it submits all twenty steps as ONE job sized for the
+heaviest, cannot run independent stages at once, hashes config rather than
+code, and produces neither a report nor a provenance bundle.
 
 ## Layout
 
@@ -24,28 +37,43 @@ All executables share a `scenicplus_` prefix to avoid collisions on `PATH`.
 
 ```
 $SCENICPLUS_PATH/                          # central pipeline (set by the user)
+├── Snakefile                              # orchestration; includes rules/
+├── rules/                                 # common.smk + one file per stage group
+├── schemas/config.schema.yaml             # rejects an unknown or mistyped key
+├── profiles/lsf/                          # one bsub per rule
 ├── config/config.yaml                     # template — copied into each analysis dir
+├── tests/                                 # local gates; none needs a cluster
 └── scripts/                               # all executables ($PATH)
+    ├── scenicplus.run.sh                  # THE ENTRY POINT
     ├── scenicplus_init.sh                 # bootstrap a new analysis directory
     ├── scenicplus_check.sh                # preflight: required Python + R packages
-    ├── scenicplus_helper.py               # YAML-slice + sha256 helper
-    ├── scenicplus_run_pipeline.sh         # the 20-step master driver
-    ├── scenicplus_run_workstation.sh      # thin wrapper for workstations
-    ├── scenicplus_run_lsf.sh              # bsub wrapper for LSF clusters
-    ├── scenicplus_01_seurat_to_anndata.R  # step scripts (called by the
-    ├── scenicplus_02_build_anndata.py     #  driver — not invoked by users)
+    ├── scenicplus_genome_prepare.py       # R07: validates the genome pair
+    ├── scenicplus_09_report.py            # R21: builds report.html
+    ├── scenicplus_provenance.py           # onstart/onsuccess/onerror bundles
+    ├── scenicplus_helper.py               # YAML-slice + sha256 helper (driver-era)
+    ├── scenicplus_run_pipeline.sh         # OBSOLETE 20-step driver, kept
+    ├── scenicplus_run_workstation.sh      # OBSOLETE thin wrapper
+    ├── scenicplus_run_lsf.sh              # OBSOLETE bsub wrapper
+    ├── scenicplus_01_seurat_to_anndata.R  # step scripts (called by the rules
+    ├── scenicplus_02_build_anndata.py     #  — not invoked by users)
     ├── scenicplus_03_create_cistopic.py
     ├── scenicplus_04_topic_modeling.py
     ├── scenicplus_05_region_sets.py
     ├── scenicplus_06_grn_stage.py         # dispatches GRN stages 06-18
-    ├── scenicplus_07_postprocess_tsv.py   # driver step 19
-    └── scenicplus_08_visualize.py         # driver step 20
+    ├── scenicplus_07_postprocess_tsv.py   # step 19
+    └── scenicplus_08_visualize.py         # step 20
 
 <analysis-dir>/                            # one of these per dataset
 ├── config/config.yaml                     # the only file the user edits
-├── results/                               # outputs (created by pipeline)
-└── logs/                                  # per-step logs
+├── 0.input/  1.export/  2.anndata/  3.cistopic/  4.grn/  5.analysis/
+├── QC/                                    # model selection, per-stage counts
+├── logs/                                  # one per rule, plus logs/lsf/
+├── provenance/<timestamp>_<status>/       # one bundle per run
+└── report.html                            # what `rule all` targets
 ```
+
+The numbered directories are pipeline STAGES, in order. The mapping from the
+old driver's `results/` and `interim/` layout is in RUNBOOK section 5.
 
 ## Setup
 
@@ -58,19 +86,26 @@ $SCENICPLUS_PATH/                          # central pipeline (set by the user)
    export PATH="$SCENICPLUS_PATH/scripts:$PATH"
    ```
 
-2. Create the conda environment (See section #4 for macos). `environment.yml` at the repo root pins
-   Python 3.11.8, R + Seurat / Matrix / optparse, and a single pip line for
-   `scenicplus` (which pulls `pycisTopic` and `pycistarget` in transitively
-   along with the rest of the Python stack — scanpy / anndata / mudata /
-   pyranges / pybedtools / …):
+2. Create the conda environment (see section #4 for macOS):
 
    ```bash
-   conda env create -f "$SCENICPLUS_PATH/environment.yml"
-   conda activate scenicplus_limlab
+   ./install_cchmc.sh /path/to/scenicplus_env
    ```
 
-   If your cluster has no outbound internet, clone the SCENIC+ repo and
-   `pip install -e /path/to/scenicplus` from a local checkout instead.
+   **Use `install_cchmc.sh`, not `conda env create -f environment.yml`.**
+   `environment.yml` is the original recipe and its own header says the
+   pipeline was never run-tested against it; it does not produce a working
+   environment. `install_cchmc.sh` builds from `environment.cchmc.yml`, whose
+   header lists the four deviations and why each is load-bearing. Takes about
+   20 minutes. RUNBOOK section 1 covers the rest, including what to do when the
+   cluster gates outbound PyPI.
+
+   Both `cchmc` files are named for the only site they have been run at. A
+   first run elsewhere is a port, not an install.
+
+   The environment provides Python 3.11.8, R with Seurat / Matrix / optparse,
+   and `scenicplus` (which pulls in `pycisTopic`, `pycistarget`, scanpy,
+   anndata, mudata, pyranges, pybedtools and the rest).
 
    You can also use a pre-existing env — just point the launcher at it via
    `SCENICPLUS_ENV=<env_name>` and it will `conda activate` for you.
@@ -82,9 +117,11 @@ $SCENICPLUS_PATH/                          # central pipeline (set by the user)
    SCENICPLUS_ENV=scenicplus_limlab scenicplus_check.sh    # check a specific env
    ```
 
-   The launcher scripts run this preflight automatically before kicking off
-   the pipeline. Set `SCENICPLUS_SKIP_CHECK=1` to skip it (useful when the
-   cluster compute node has a different env from the submitting host).
+   `scenicplus.run.sh` runs this preflight before handing off to snakemake --
+   deliberately in the runner rather than as a rule, so a bad environment is
+   found once, up front, instead of once per rule after twenty queue waits.
+   Set `SCENICPLUS_SKIP_CHECK=1` to skip it (useful when the compute node has a
+   different env from the submitting host).
 
 3. Download external resources (one-time):
    - **cisTarget databases (rankings + scores)** — **required**. These large
@@ -125,48 +162,50 @@ scenicplus_init.sh
 # 3. Edit the config: paths to RDS, ctx/dem DBs, motif annotations, species.
 $EDITOR config/config.yaml
 
-# 4a. Workstation
-SCENICPLUS_ENV=scenicplus_limlab scenicplus_run_workstation.sh
+# 4. Look at the plan before spending anything.
+scenicplus.run.sh -n
 
-# 4b. LSF (single bsub'd driver job)
-SCENICPLUS_ENV=scenicplus_limlab LSF_QUEUE=long LSF_CORES=16 \
-    scenicplus_run_lsf.sh
+# 5a. Workstation
+SCENICPLUS_ENV=scenicplus_limlab scenicplus.run.sh -j 8
+
+# 5b. LSF — one job per rule, at most 20 in flight
+SCENICPLUS_ENV=scenicplus_limlab scenicplus.run.sh --lsf -j 20
 ```
 
-Both launchers ultimately call `scenicplus_run_pipeline.sh`, which always runs from the
-**current working directory** (your analysis dir) and reads `./config/config.yaml`.
+`scenicplus.run.sh` runs from the **current working directory** (your analysis
+dir) and reads `./config/config.yaml`. It runs the preflight first, then hands
+off to snakemake; anything after `--` goes straight to snakemake.
 
-### Re-running and staleness
+A run ends with `report.html`. Open that first.
 
-Each step writes a sentinel output plus a `<sentinel>.cfgsha` sidecar
-containing sha256 of the config keys that step actually reads. A step is
-**skipped** iff:
+### Re-running
 
-1. Its sentinel exists, **and**
-2. Its `.cfgsha` matches the current config slice, **and**
-3. No upstream sentinel is newer than its own.
-
-Once a step has to run, every later step is force-run in the same invocation.
-Outputs are written to `<sentinel>.partial` first and atomically renamed, so
-crashes never leave a half-written file that looks fresh.
-
-CLI flags (forwarded through `scenicplus_run_workstation.sh` / `scenicplus_run_lsf.sh`):
+Snakemake decides what is stale, from the file times, the code and the config
+values each rule declares. Editing a config key re-runs the rules that read it
+and everything downstream of those, and nothing else — `cistopic.dar_log2fc_thr`
+re-runs step 05 onward while step 04's LDA output stays put.
 
 ```bash
-scenicplus_run_pipeline.sh             # run everything that's stale
-scenicplus_run_pipeline.sh --dry-run   # show which steps would run
-scenicplus_run_pipeline.sh --from 4    # force re-run from step 4 onward
-scenicplus_run_pipeline.sh --only 4    # run only step 4
-scenicplus_run_pipeline.sh --force     # force re-run everything
+scenicplus.run.sh -n              # show what would run
+scenicplus.run.sh -f 4            # force rule R04_* and its DEPENDENTS
+scenicplus.run.sh -- --forceall   # force everything
 ```
 
-Because the staleness check is per-step on a config *slice*, editing
-`cistopic.dar_log2fc_thr` only invalidates step 05 onward; LDA outputs from
-step 04 stay cached.
+**`-f N` names a rule, not a range.** It becomes `--forcerun R<NN>_*`, so it
+re-runs that rule and what depends on it. The DAG forks, so `-f 9` leaves R10
+and R13 alone and `-f 14` leaves R15 and R17 alone. The obsolete driver's
+`--from N` did mean "every step numbered N or higher"; the two are not
+equivalent. RUNBOOK section 4 has the table.
 
-`scenicplus_run_pipeline.sh` validates that `config.yaml` has `Pipeline: "ScenicPlus"`;
-if that line is missing it aborts immediately, so an unrelated pipeline's
-config cannot be fed in by accident.
+**Never delete `.snakemake/`.** It holds the per-output record that four of the
+five rerun triggers compare against, and without it a config change silently
+does nothing. Recover with `-- --forceall`, never with `--touch`.
+
+The workflow validates `config.yaml` against `schemas/config.schema.yaml` at
+DAG-build time, before any job is submitted: a mistyped key is named and
+refused rather than silently falling back to a default. It also requires
+`Pipeline: "ScenicPlus"`, so an unrelated pipeline's config cannot be fed in by
+accident.
 
 ## Inputs (set in `config/config.yaml`)
 
@@ -195,57 +234,63 @@ config cannot be fed in by accident.
 
 | Path | Description |
 | ---- | ----------- |
-| `results/tables/eRegulons_direct.tsv`     | TF-region-gene with importance, rho, triplet rank (direct annotations) |
-| `results/tables/eRegulons_extended.tsv`   | same, extended (orthology / motif-similarity) annotations |
-| `results/tables/eRegulons_combined.tsv`   | union of direct + extended |
-| `results/tables/TF_summary.tsv`           | per-TF target counts and mean importance |
-| `results/tables/AUC_gene_per_cell.tsv`    | eRegulon (gene-based) AUC per cell |
-| `results/tables/AUC_region_per_cell.tsv`  | eRegulon (region-based) AUC per cell |
-| `results/tables/RSS_per_celltype.tsv`     | regulon specificity scores |
-| `results/tables/eRegulons_per_celltype.tsv` | top-N eRegulons per cell type |
-| `results/plots/01_umap_celltype.{pdf,png}`         | UMAP coloured by cell type |
-| `results/plots/02_umap_eRegulon_<TF>.{pdf,png}`    | UMAP per top eRegulon AUC |
-| `results/plots/03_rss_per_celltype.{pdf,png}`      | RSS rank plot |
-| `results/plots/04_heatmap_dotplot_direct.{pdf,png}` | gene/region AUC heatmap-dotplot |
-| `results/plots/05_heatmap_dotplot_extended.{pdf,png}` | same, extended cistromes |
-| `results/plots/06_TF_target_count.{pdf,png}`       | top TFs by # target genes |
-| `results/plots/07_TF_importance_distribution.{pdf,png}` | TF→gene importance density |
-| `results/plots/08_eGRN_network_top<N>.{pdf,png}`    | TF-target network |
+| `5.analysis/tsv/eRegulons_direct.tsv`     | TF-region-gene with importance, rho, triplet rank (direct annotations) |
+| `5.analysis/tsv/eRegulons_extended.tsv`   | same, extended (orthology / motif-similarity) annotations |
+| `5.analysis/tsv/eRegulons_combined.tsv`   | union of direct + extended |
+| `5.analysis/tsv/TF_summary.tsv`           | per-TF target counts and mean importance |
+| `5.analysis/tsv/AUC_gene_per_cell.tsv`    | eRegulon (gene-based) AUC per cell |
+| `5.analysis/tsv/AUC_region_per_cell.tsv`  | eRegulon (region-based) AUC per cell |
+| `5.analysis/tsv/RSS_per_celltype.tsv`     | regulon specificity scores |
+| `5.analysis/tsv/eRegulons_per_celltype.tsv` | top-N eRegulons per cell type |
+| `5.analysis/plots/01_umap_celltype.{pdf,png}`         | UMAP coloured by cell type |
+| `5.analysis/plots/02_umap_eRegulon_<TF>.{pdf,png}`    | UMAP per top eRegulon AUC |
+| `5.analysis/plots/03_rss_per_celltype.{pdf,png}`      | RSS rank plot |
+| `5.analysis/plots/04_heatmap_dotplot_direct.{pdf,png}` | gene/region AUC heatmap-dotplot |
+| `5.analysis/plots/05_heatmap_dotplot_extended.{pdf,png}` | same, extended cistromes |
+| `5.analysis/plots/06_TF_target_count.{pdf,png}`       | top TFs by # target genes |
+| `5.analysis/plots/07_TF_importance_distribution.{pdf,png}` | TF→gene importance density |
+| `5.analysis/plots/08_eGRN_network_top<N>.{pdf,png}`    | TF-target network |
 
 ## Pipeline stages
 
 | # | Step              | Inputs                              | Outputs |
 | - | ----------------- | ----------------------------------- | ------- |
 | 1 | `seurat_to_anndata` | `input.seurat_rds`                 | mtx/tsv artifacts |
-| 2 | `build_anndata`     | mtx artifacts                      | `interim/rna.h5ad` |
-| 3 | `create_cistopic`   | ATAC mtx                           | `interim/cistopic_obj.pkl` |
+| 2 | `build_anndata`     | mtx artifacts                      | `2.anndata/rna.h5ad` |
+| 3 | `create_cistopic`   | ATAC mtx                           | `3.cistopic/cistopic_obj.pkl` |
 | 4 | `topic_modeling`    | cistopic_obj.pkl                   | with-topics pkl |
-| 5 | `region_sets`       | with-topics pkl                    | `interim/region_sets/` |
-| 6 | `prepare_gex_acc`   | adata + cistopic                   | `scplus_out/ACC_GEX.h5mu` |
-| 7 | `genome_annot`      | biomart                            | `scplus_out/genome_annotation.tsv`, `chromsizes.tsv` |
-| 8 | `search_space`      | ACC_GEX + genome_annot             | `scplus_out/search_space.tsv` |
-| 9 | `cistarget`         | region_sets + ctx_db               | `scplus_out/ctx_results.hdf5` |
-| 10 | `dem`              | region_sets + dem_db               | `scplus_out/dem_results.hdf5` |
-| 11 | `prepare_menr`     | cistarget + dem + ACC_GEX          | `scplus_out/tf_names.txt`, `cistromes_{direct,extended}.h5ad` |
-| 12 | `tf_to_gene`       | ACC_GEX + tf_names                 | `scplus_out/tf_to_gene_adj.tsv` |
-| 13 | `region_to_gene`   | ACC_GEX + search_space             | `scplus_out/region_to_gene_adj.tsv` |
-| 14 | `egrn_direct`      | adjacencies + cistromes_direct     | `scplus_out/eRegulons_direct.tsv` |
-| 15 | `egrn_extended`    | adjacencies + cistromes_extended   | `scplus_out/eRegulons_extended.tsv` |
-| 16 | `aucell_direct`    | eRegulons_direct + ACC_GEX         | `scplus_out/AUCell_direct.h5mu` |
-| 17 | `aucell_extended`  | eRegulons_extended + ACC_GEX       | `scplus_out/AUCell_extended.h5mu` |
-| 18 | `scplus_mudata`    | AUCell + eRegulons + ACC_GEX       | `scplus_out/scplusmdata.h5mu` |
-| 19 | `postprocess_tsv`  | scplusmdata.h5mu                   | TSVs in `results/tables/` |
-| 20 | `visualize`        | scplusmdata.h5mu                   | plots in `results/plots/` |
+| 5 | `region_sets`       | with-topics pkl                    | `3.cistopic/region_sets/` |
+| 6 | `prepare_gex_acc`   | adata + cistopic                   | `4.grn/ACC_GEX.h5mu` |
+| 7 | `genome_annot`      | biomart                            | `4.grn/genome_annotation.tsv`, `chromsizes.tsv` |
+| 8 | `search_space`      | ACC_GEX + genome_annot             | `4.grn/search_space.tsv` |
+| 9 | `cistarget`         | region_sets + ctx_db               | `4.grn/ctx_results.hdf5` |
+| 10 | `dem`              | region_sets + dem_db               | `4.grn/dem_results.hdf5` |
+| 11 | `prepare_menr`     | cistarget + dem + ACC_GEX          | `4.grn/tf_names.txt`, `cistromes_{direct,extended}.h5ad` |
+| 12 | `tf_to_gene`       | ACC_GEX + tf_names                 | `4.grn/tf_to_gene_adj.tsv` |
+| 13 | `region_to_gene`   | ACC_GEX + search_space             | `4.grn/region_to_gene_adj.tsv` |
+| 14 | `egrn_direct`      | adjacencies + cistromes_direct     | `4.grn/eRegulons_direct.tsv` |
+| 15 | `egrn_extended`    | adjacencies + cistromes_extended   | `4.grn/eRegulons_extended.tsv` |
+| 16 | `aucell_direct`    | eRegulons_direct + ACC_GEX         | `4.grn/AUCell_direct.h5mu` |
+| 17 | `aucell_extended`  | eRegulons_extended + ACC_GEX       | `4.grn/AUCell_extended.h5mu` |
+| 18 | `scplus_mudata`    | AUCell + eRegulons + ACC_GEX       | `4.grn/scplusmdata.h5mu` |
+| 19 | `postprocess_tsv`  | scplusmdata.h5mu                   | TSVs in `5.analysis/tsv/` |
+| 20 | `visualize`        | scplusmdata.h5mu                   | plots in `5.analysis/plots/` |
 
+Each step above is one rule, named `R01_*` through `R20_*`, plus `R21_report`.
 Steps 6-18 are the SCENIC+ GRN inference DAG, each a discrete `scenicplus` CLI
 call (via `scenicplus_06_grn_stage.py`) that formerly ran inside one opaque
-inner snakemake. Because each stage now has its own `.cfgsha`, editing a GRN
-parameter re-runs only the affected stage onward — e.g. changing
-`grn.rho_threshold` re-runs from `egrn_direct` (14), leaving the expensive
-`cistarget`/`dem` motif enrichment cached.
+inner snakemake. Flattening it also recovered the parallelism it had: cistarget
+and dem run together, as do tf_to_gene and region_to_gene, the two eGRN
+branches and the two AUCell branches.
 
-See `workflow.md` for per-step inputs/outputs, key options, and the core
-SCENIC+ / pycisTopic API calls each step makes.
+Each rule declares the config keys its script reads, so editing a GRN parameter
+re-runs the rules that read it and their dependents — changing
+`grn.rho_threshold` re-runs from `egrn_direct` (14), leaving the expensive
+`cistarget`/`dem` motif enrichment alone.
+
+`workflow.md` describes the same steps as the bash driver ran them; its
+per-step inputs, options and API calls still hold, its orchestration no longer
+does. RUNBOOK section 5 has the reservations and the measured runtimes.
 
 ## Notes
 

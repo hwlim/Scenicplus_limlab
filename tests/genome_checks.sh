@@ -140,5 +140,83 @@ run "$W/ann_ens.tsv" "$W/cs.tsv" "$W/peaks.tsv" hg38 >/dev/null 2>&1
     || say FAIL "a refused pair still wrote an output"
 
 echo
+echo "  and the report must say WHICH of the four situations the reader is in:"
+
+# --- 8. the report's Genome panel, driven by the PRODUCER's own record ------
+# THE FIXTURE IS THIS SCRIPT. scenicplus_09_report.py compared `input.assembly`
+# to `chr1_matches` with `==`. The record says "hg38/GRCh38" -- one length, both
+# accepted spellings -- and the config says "hg38", so the equality was false,
+# the two `not` branches were false, and a REAL report printed no panel at all:
+# no confirmation, no warning, a section that reads as if it were never written.
+#
+# tests/report_render.sh could not see it because it hand-wrote
+# `"chr1_matches": "hg38"`, a value this script has never emitted. Consumer and
+# fixture were written from the same imagination and agreed with each other and
+# with nothing. So the record below comes from the producer, which is the only
+# pairing that can disagree usefully -- the same lesson as tests/record_keys.py,
+# one level down: that file anchors the key NAMES, this one the VALUES.
+panel() {  # panel <chr1 length> <assembly> -> the rendered Genome section
+    mk_chromsizes "$W/cs_p.tsv" "$1"
+    "$PY" "$PREP" --annotation "$W/ann.tsv" --chromsizes "$W/cs_p.tsv" \
+        --atac_regions "$W/peaks.tsv" --out_annotation "$W/pa.tsv" \
+        --out_chromsizes "$W/pc.tsv" --record "$W/rec_p.json" \
+        --species hsapiens --assembly "$2" >/dev/null 2>&1
+    [[ -s "$W/rec_p.json" ]] || { echo "PRODUCER-WROTE-NO-RECORD"; return 0; }
+    "$PY" - "$W/rec_p.json" <<'PY'
+import os, sys
+sys.path.insert(0, os.path.join(os.environ["SCENICPLUS_PATH"], "scripts"))
+import scenicplus_09_report as rep
+print(rep.sec_assembly(sys.argv[1]))
+PY
+}
+n_panels() { grep -o 'class="\(ok\|miss\|bad\)"' <<<"$1" | wc -l; }
+
+# The regression itself: SOME panel, in every one of the four situations. This
+# is the assertion the shipped bug would have failed and the equality-based
+# code cannot satisfy for a recognised assembly.
+for spec in "248956422 hg38 confirmed" "248956422 hg19 mismatch" \
+            "248956422 '' unset" "123456789 hg19 unrecognised"; do
+    eval "set -- $spec"
+    P="$(panel "$1" "$2")"
+    if [[ "$(n_panels "$P")" == 1 ]]; then
+        say ok "$3: exactly one panel renders"
+    else
+        say FAIL "$3: $(n_panels "$P") panels rendered, expected exactly 1"
+    fi
+done
+
+# ...and it must be the RIGHT panel. Without this, four empty-but-present divs
+# would pass the count above.
+P="$(panel 248956422 hg38)"
+grep -q "Assembly confirmed" <<<"$P" \
+    && say ok "the producer's \"hg38/GRCh38\" confirms a configured \"hg38\"" \
+    || say FAIL "a correct pair did not produce the confirmation panel"
+# Both halves, because the count above cannot separate them: restore the `==`
+# and a CORRECT pair falls through to the mismatch panel, which is one panel
+# and the wrong one. Measured -- that is what the negative control produced.
+grep -q 'class="bad"' <<<"$P" \
+    && say FAIL "a correct pair ALSO raised the mismatch panel" \
+    || say ok "...and raises no mismatch panel alongside it"
+
+# NEGATIVE CONTROL for the check above: hg19 is absent from R07's EXPECTED_CHR1,
+# so R07 does NOT gate it and the disagreement reaches the report. If this
+# renders "confirmed", assembly_agrees() is matching anything.
+P="$(panel 248956422 hg19)"
+grep -q "Assembly MISMATCH" <<<"$P" \
+    && say ok "hg38 data configured as hg19 is reported as a MISMATCH" \
+    || say FAIL "an hg19/hg38 disagreement was not reported as a mismatch"
+
+P="$(panel 248956422 '')"
+grep -q "Assembly NOT confirmed" <<<"$P" \
+    && say ok "an unset input.assembly is reported as unchecked" \
+    || say FAIL "an unset input.assembly produced the wrong panel"
+
+# chr1 at a length in no reference table: detected is null, configured is not.
+P="$(panel 123456789 hg19)"
+grep -q "Assembly unrecognised" <<<"$P" \
+    && say ok "a chr1 length in no reference table is reported as unrecognised" \
+    || say FAIL "an unrecognised chr1 length produced the wrong panel"
+
+echo
 [[ "$FAIL" -ne 0 ]] && { echo "FAILED"; exit 1; }
 echo "all checks passed"

@@ -10,8 +10,21 @@
 #   scenicplus.run.sh --lsf             # submit each rule via profiles/lsf
 #   scenicplus.run.sh --lsf -j 20       # ... at most 20 cluster jobs at once
 #   scenicplus.run.sh -p                # also print each shell command
-#   scenicplus.run.sh -f 7              # force from step 7 (rule R07_*) onward
+#   scenicplus.run.sh -f 7              # force rule R07_* and its DEPENDENTS
 #   scenicplus.run.sh -- --forceall     # anything after -- goes to snakemake
+#
+# `-f N` SELECTS A RULE, NOT A RANGE. It becomes `--forcerun R<NN>_*`, so
+# snakemake re-runs that rule and everything that DEPENDS on it -- which is not
+# the same as every step numbered N or higher, because this workflow forks:
+#
+#     -f 7   skips R09          (cistarget needs only the region sets)
+#     -f 9   skips R10, R13     (dem and region_to_gene are R09's siblings)
+#     -f 14  skips R15, R17     (the extended eGRN/AUCell branch)
+#
+# The obsolete driver's `--from N` DID mean "every step numbered N or higher" --
+# it walks a line and compares numbers. The two are not equivalent, so a habit
+# converted straight across will quietly leave a sibling stage untouched. To
+# rebuild a specific stage, name that stage: `-f 10` is what re-runs dem.
 #
 # WHY THE PREFLIGHT IS HERE AND NOT A RULE. scenicplus_check.sh has no outputs,
 # so as a rule it would either run on every invocation or need a sentinel that
@@ -142,7 +155,10 @@ if [[ -n "$FROM" ]]; then
     else
         rule="$FROM"
     fi
-    echo "[scenicplus.run] forcing from ${rule} onward"
+    # "and everything downstream", not "onward": a rule's DEPENDENTS, which in a
+    # forked DAG is not every higher-numbered rule. The old wording is what the
+    # documentation was repeating.
+    echo "[scenicplus.run] forcing ${rule} and everything downstream of it"
     ARGS+=(--forcerun "$rule")
 fi
 

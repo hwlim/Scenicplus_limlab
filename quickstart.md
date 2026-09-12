@@ -213,10 +213,17 @@ provenance bundle. Converting a habit:
 | bash driver | workflow |
 |---|---|
 | `scenicplus_run_pipeline.sh --dry-run` | `scenicplus.run.sh -n` |
-| `--from 7` | `-f 7` |
+| `--from 7` | `-f 7` — **close, not equal**, see below |
 | `--force` | `-- --forceall` |
 | `scenicplus_run_workstation.sh` | `scenicplus.run.sh -j <cores>` |
 | `scenicplus_run_lsf.sh` | `scenicplus.run.sh --lsf -j 20` |
+
+**The one row that is not a straight swap is `--from`.** The driver walks a
+line, so `--from 7` means every step numbered 7 or higher. `-f 7` becomes
+snakemake's `--forcerun R07_*`, which re-runs that rule and everything that
+DEPENDS on it — and the workflow forks, so `-f 9` leaves R10 and R13 alone and
+`-f 14` leaves R15 and R17 alone. The run still ends green, with a stage you
+meant to redo untouched. Name the stage you want: `-f 10` re-runs dem.
 
 ## G. Watch, then read
 

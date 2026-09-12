@@ -31,21 +31,36 @@ list = use every cell.
 - Comprehensive data sheet in tsv format matching the visualziation results
 
 ## Implementation note
-- Sequential bash-driven implementation starting from a seurat object. The
-  outer orchestrator is `scripts/scenicplus_run_pipeline.sh` (the master
-  driver) which walks 20 sequential steps in the same `scripts/` folder. All
-  shipped executables share a `scenicplus_` prefix to avoid PATH collisions
-  with other pipelines. There is no snakemake anywhere: SCENIC+'s former inner
-  snakemake (old step 07) has been flattened into native driver stages 06-18,
-  one `scenicplus` CLI call each, dispatched by `scenicplus_06_grn_stage.py`.
-  Steps 01-05 preprocess (R/pycisTopic), 06-18 are the GRN inference DAG, and
-  19-20 postprocess/visualize (`scenicplus_07_*.py`, `scenicplus_08_*.py` — the
-  file-name prefixes are historical and no longer equal the driver step
-  number). Flattening trades the inner snakemake's intra-DAG parallelism
-  (cistarget || dem, etc.) for real per-stage sentinel/`.cfgsha`/cascade resume;
-  each stage still multi-threads via `resources.n_cpu`.
+- **A Snakemake workflow is the pipeline.** `Snakefile` + `rules/` define 21
+  rules (`R01_*`…`R20_*` plus `R21_report`), each with a per-rule LSF
+  reservation measured from a real run, and `rule all` targets `report.html`.
+  The entry point is `scripts/scenicplus.run.sh`. `SnakemakePlan.md` carries
+  every increment and the defects each one turned up; resume from there.
+- SCENIC+'s former inner snakemake (old step 07) is flattened into native
+  stages 06-18, one `scenicplus` CLI call each, dispatched by
+  `scenicplus_06_grn_stage.py`. Steps 01-05 preprocess (R/pycisTopic), 06-18
+  are the GRN inference DAG, and 19-20 postprocess/visualize
+  (`scenicplus_07_*.py`, `scenicplus_08_*.py` — the file-name prefixes are
+  historical and no longer equal the step number). Declaring each stage's real
+  inputs recovered the intra-DAG parallelism the flattening had cost:
+  cistarget ∥ dem, tf_to_gene ∥ region_to_gene, and both branch pairs after.
+- All shipped executables share a `scenicplus_` prefix to avoid PATH collisions
+  with other pipelines. `scenicplus.run.sh` is the one exception, named to read
+  as the verb it is.
+- **`scripts/scenicplus_run_pipeline.sh` is OBSOLETE and deliberately KEPT** —
+  as a fallback and for reproducing older runs. It walks the 20 steps
+  sequentially as ONE job sized for the heaviest, resumes on
+  sentinel/`.cfgsha`/cascade, and produces neither a report nor a provenance
+  bundle. Do not extend it, and do not point a new user at it.
 - Relevant settings parameters defined in a yaml file (`config/config.yaml`).
-- The master driver checks intermediate results before running each step. A
+- **Resume, in the workflow:** snakemake decides, from file times, the code, and
+  the config values each rule declares via `cfg_params()` in `rules/common.smk`.
+  The step scripts read the config file themselves, so without those
+  declarations a config edit would change nothing — that is the whole reason
+  the helper exists. **Never delete `.snakemake/`**; recover with `--forceall`,
+  never `--touch`.
+- **Resume, in the obsolete driver** (below, for reference only): it checks
+  intermediate results before running each step. A
   step is skipped iff (a) its sentinel output exists, (b) the sha256 of the
   config keys it actually reads matches the `<sentinel>.cfgsha` sidecar
   written on the previous run, and (c) no upstream sentinel is newer than its
@@ -53,14 +68,16 @@ list = use every cell.
   invocation. Per-step outputs are written to `<sentinel>.partial` and
   atomically renamed so a crash never leaves a half-written file that looks
   fresh.
-- CLI: `scenicplus_run_pipeline.sh [--dry-run|--from N|--only N|--force]`.
-- Bash launchers are thin wrappers around `scenicplus_run_pipeline.sh`:
-  - `scenicplus_run_workstation.sh` — `exec`s the driver in the current shell.
-  - `scenicplus_run_lsf.sh` — bsubs the driver as a single LSF job
-    (cores/mem/walltime via env vars). The bsub'd job is sized for the heaviest
-    GRN stages (cistarget/dem/tf_to_gene/region_to_gene), which multi-thread
-    with that many cores. (Now that these are discrete steps, they could later
-    be split into individually right-sized LSF jobs.)
+- CLI: `scenicplus.run.sh [-n] [-j N] [--lsf] [-p] [-f N] [-- <snakemake args>]`.
+  **`-f N` selects a RULE and its dependents, not a range of steps** — the DAG
+  forks, so `-f 9` leaves R10 and R13 alone. The obsolete driver's `--from N`
+  did mean every step numbered N or higher; the two are not equivalent.
+- The obsolete driver and its two launchers are still present and still work:
+  `scenicplus_run_pipeline.sh [--dry-run|--from N|--only N|--force]`,
+  `scenicplus_run_workstation.sh` (execs it here),
+  `scenicplus_run_lsf.sh` (bsubs it as ONE job sized for the heaviest GRN
+  stage). That single oversized job is the reason they were retired — the
+  workflow right-sizes each rule instead.
 - Assume that the seurat object already contains cluster, cell type
   annotation, and UMAP projection. Incorporate those as much as possible.
 - Separate implementation and per-execution configuration:
@@ -72,8 +89,11 @@ list = use every cell.
     `config.yaml` from the central location into the analysis folder.
   - Users only access and edit `config.yaml` under the analysis directory.
   - `config.yaml` must contain `Pipeline: "ScenicPlus"`.
-    `scenicplus_run_pipeline.sh` checks this and aborts if it's missing or
-    wrong, so an unrelated pipeline's config cannot be fed in by accident.
+    Both the workflow and the driver check this and abort if it's missing or
+    wrong, so an unrelated pipeline's config cannot be fed in by accident. The
+    workflow additionally validates the whole config against
+    `schemas/config.schema.yaml` at DAG-build time, so a mistyped key is named
+    and refused instead of silently falling back to a default.
   - Assume `SCENICPLUS_PATH` is already defined and `$SCENICPLUS_PATH/scripts`
     is on `PATH`.
   - Keep `README.md` in sync with how to set up and run the pipeline.

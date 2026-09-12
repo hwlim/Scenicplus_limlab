@@ -144,6 +144,16 @@ checks = [
      "R11_prepare_menr" in deps.get("R12_tf_to_gene", set()), None),
     ("R08 needs R07, so the genome pair is checked first",
      "R07_genome_annot" in deps.get("R08_search_space", set()), None),
+    # The edge this suite MISSED. dem takes --genome_annotation under
+    # `dem_balance_number_of_promoters` (shipped default: true) and the rule did
+    # not declare it, so a changed genome pair re-ran R07, R08 and R13 while
+    # R10's promoter balancing kept using the old annotation -- no error, other
+    # motifs. Nothing above could see it: every check here was about the edges
+    # that WERE declared. 7c asserts the other half, that the edge disappears
+    # when the branch is off.
+    ("R10 needs R07, because balanced dem reads the annotation",
+     "R07_genome_annot" in deps.get("R10_dem", set()),
+     sorted(deps.get("R10_dem", set()))),
     ("R13 needs R08, for the search space",
      "R08_search_space" in deps.get("R13_region_to_gene", set()), None),
     # The parallelism the increment exists for.
@@ -166,6 +176,141 @@ if [[ $? -eq 0 ]]; then
     say ok "the DAG has the right shape: 21 rules, and the four pairs stay parallel"
 else
     say FAIL "the DAG's shape is wrong"; sed -n '1,5p' "$WORK/dag.txt"
+fi
+
+# 7c. ...and the R10->R07 edge is CONDITIONAL, because the argument is.
+#
+# Without this, declaring the annotation unconditionally would pass 7 just as
+# well, and the false setting would carry a rerun trigger for a file dem never
+# opens -- re-running a 12.9 GB-database step whenever the genome pair changed
+# for someone who had switched the balancing off. Asserting an edge's ABSENCE
+# is also what proves 7's version of it is measuring something: both cases
+# build the same graph and differ only here.
+edit_cfg 'c["scenicplus"]["dem_balance_number_of_promoters"] = False'
+snakemake --snakefile "$SCENICPLUS_PATH/Snakefile" --dag >"$WORK/dag_nb.dot" 2>/dev/null
+python3 - "$WORK/dag_nb.dot" <<'PY'
+import re, sys
+t = open(sys.argv[1]).read()
+label = dict(re.findall(r'(\d+)\[label = "([^"\\]+)', t))
+deps = {}
+for a, b in re.findall(r'(\d+) -> (\d+)', t):
+    deps.setdefault(label.get(b, b), set()).add(label.get(a, a))
+dem = deps.get("R10_dem", set())
+# The graph must still be a graph -- an empty parse would satisfy the assertion
+# below for the wrong reason, which is how a check stops being one.
+assert "R10_dem" in label.values(), "R10_dem absent from the DAG; parse failed"
+assert dem, f"R10_dem has no dependencies at all: {sorted(label.values())[:5]}"
+sys.exit(1 if "R07_genome_annot" in dem else 0)
+PY
+if [[ $? -eq 0 ]]; then
+    say ok "...and with balancing OFF the R10->R07 edge is gone"
+else
+    say FAIL "R10 still depends on R07 with dem_balance_number_of_promoters false"
+fi
+restore
+
+# 7d. THE DOCUMENTED `-f N` EXAMPLES, against the real DAG.
+#
+# `-f N` becomes `--forcerun R<NN>_*`, so snakemake re-runs that rule and its
+# DEPENDENTS -- not every step numbered N or higher, because this workflow
+# forks. Four documents said "from step N onward", copying the obsolete
+# driver's semantics, where `--from N` really does compare numbers. Following
+# that, `-f 9` looks like it rebuilds dem and region_to_gene and does not, and
+# the run still ends green.
+#
+# The fix was prose, so the prose is what can rot. These examples are now
+# derived from the resolved graph and compared against what the documents
+# claim, which also means a DAG change surfaces here rather than in a reader's
+# wrong expectation. It already would have: adding R10's genome-annotation edge
+# (7 above) changed R07's skip set from {R09, R10} to {R09}.
+snakemake --snakefile "$SCENICPLUS_PATH/Snakefile" --dag >"$WORK/dag2.dot" 2>/dev/null
+python3 - "$WORK/dag2.dot" "$SCENICPLUS_PATH" <<'PY' >"$WORK/fdoc.txt" 2>&1
+import os, re, sys
+dot, root = sys.argv[1], sys.argv[2]
+t = open(dot).read()
+label = dict(re.findall(r'(\d+)\[label = "([^"\\]+)', t))
+kids = {}
+for a, b in re.findall(r'(\d+) -> (\d+)', t):
+    kids.setdefault(label.get(a, a), set()).add(label.get(b, b))
+rules = sorted(r for r in set(label.values()) if re.match(r"R\d\d_", r))
+assert len(rules) == 21, f"expected 21 rules, parsed {len(rules)}"
+
+
+def skipped(n):
+    """Numbers >= n that --forcerun R<n> does NOT reach."""
+    start = next(r for r in rules if r.startswith(f"R{n:02d}_"))
+    seen, stack = {start}, [start]
+    while stack:
+        for k in kids.get(stack.pop(), ()):
+            if k not in seen:
+                seen.add(k); stack.append(k)
+    return sorted(int(r[1:3]) for r in rules
+                  if int(r[1:3]) >= n and r not in seen)
+
+
+# What the DAG says, for the three fork points the documents use as examples.
+actual = {n: skipped(n) for n in (7, 9, 14)}
+bad = []
+for n, want in actual.items():
+    if not want:
+        bad.append(f"-f {n} skips nothing, so it is a poor example to document")
+
+# What the documents say. Each must name exactly the rules the DAG skips.
+docs = ["RUNBOOK.md", "quickstart.md", "scripts/scenicplus.run.sh",
+        "scripts/scenicplus_run_pipeline.sh", "README.md", "CLAUDE.md"]
+for d in docs:
+    text = open(os.path.join(root, d)).read()
+    # The retired wording. It is what every one of these files used to say.
+    for phrase in ("from step 7 onward", "from step 9 onward", "force from step"):
+        if phrase in text:
+            bad.append(f"{d}: still says {phrase!r}, which is the driver's "
+                       f"semantics, not --forcerun's")
+    # The generic form too, but only on a line that is about the RUNNER. The
+    # obsolete driver's own header says "force re-run from step N onward" and
+    # is CORRECT to: it walks a line and compares numbers. Flagging that would
+    # be a check punishing the one place the phrase is true.
+    for i, ln in enumerate(text.splitlines(), 1):
+        if "from step N onward" in ln and ("-f " in ln or "scenicplus.run.sh" in ln):
+            bad.append(f"{d}:{i}: describes `-f N` as 'from step N onward'")
+    # Where a file gives the skip list for a fork point, it must be right.
+    for n, want in actual.items():
+        m = re.search(rf"-f {n}\D{{0,40}}?skips? (R\d\d(?:[,\s]+(?:and )?R\d\d)*)",
+                      text)
+        if not m:
+            continue
+        got = sorted(int(x) for x in re.findall(r"R(\d\d)", m.group(1)))
+        if got != want:
+            bad.append(f"{d}: says -f {n} skips {got}, DAG says {want}")
+
+print("\n".join(bad) if bad else
+      "  ".join(f"-f {n} skips {v}" for n, v in actual.items()))
+sys.exit(1 if bad else 0)
+PY
+if [[ $? -eq 0 ]]; then
+    say ok "the documented -f examples match the DAG ($(cat "$WORK/fdoc.txt"))"
+else
+    say FAIL "the -f documentation disagrees with the DAG"; sed -n '1,6p' "$WORK/fdoc.txt"
+fi
+
+# 7e. scenicplus_init.sh must point a new user at the RUNNER.
+#
+# It printed "Edit this file, then run: scenicplus_run_workstation.sh /
+# scenicplus_run_lsf.sh" -- so the very first instruction a new user received
+# was to start the obsolete driver, months after it was retired. Checked by
+# RUNNING it, not by grepping the source: what matters is what reaches the
+# terminal.
+_INIT_WS="$WORK/initws"; mkdir -p "$_INIT_WS"
+( cd "$_INIT_WS" && bash "$SCENICPLUS_PATH/scripts/scenicplus_init.sh" ) \
+    >"$WORK/init.out" 2>&1
+if grep -q "scenicplus.run.sh" "$WORK/init.out"; then
+    say ok "scenicplus_init.sh points a new user at scenicplus.run.sh"
+else
+    say FAIL "scenicplus_init.sh does not name the runner"; cat "$WORK/init.out"
+fi
+if grep -qE 'scenicplus_run_(workstation|lsf|pipeline)\.sh' "$WORK/init.out"; then
+    say FAIL "scenicplus_init.sh still tells a new user to run the obsolete driver"
+else
+    say ok "...and does not name the obsolete launchers"
 fi
 
 # 7b. the per-rule resources SNAKEMAKE RESOLVES, against the table they come
@@ -313,7 +458,7 @@ SCENICPLUS_SKIP_CHECK=1 "$RUN" -f "$_OOR" -n >/dev/null 2>&1
 # it too -- and "redraw the report" is the single most likely thing anyone wants
 # to force. Checked explicitly, because it is the boundary the case above moved.
 out="$(SCENICPLUS_SKIP_CHECK=1 "$RUN" -f 21 -n 2>&1)"
-grep -q "forcing from R21_report onward" <<<"$out" \
+grep -q "forcing R21_report and everything downstream" <<<"$out" \
   && say ok "-f 21 resolves to R21_report, so the report can be redrawn by number" \
   || { say FAIL "-f 21 did not resolve to R21_report"; sed -n '1,4p' <<<"$out"; }
 
@@ -322,7 +467,7 @@ grep -q "forcing from R21_report onward" <<<"$out" \
 # lookup itself unexercised, and a `-f` that silently forces nothing is exactly
 # what the runner's rule lookup exists to prevent.
 out="$(SCENICPLUS_SKIP_CHECK=1 "$RUN" -f 1 -n 2>&1)"
-if grep -q "forcing from R01_seurat_export onward" <<<"$out"; then
+if grep -q "forcing R01_seurat_export and everything downstream" <<<"$out"; then
     say ok "-f 1 resolves to R01_seurat_export"
 else
     say FAIL "-f 1 did not resolve to a rule name"
