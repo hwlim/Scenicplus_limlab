@@ -232,14 +232,21 @@ provenance bundle. Converting a habit:
 | `--from 7` | `-f 7` — **close, not equal**, see below |
 | `--force` | `-- --forceall` |
 | `scenicplus_run_workstation.sh` | `scenicplus.run.sh -j <cores>` |
-| `scenicplus_run_lsf.sh` | `bsub < scenicplus.bsub.sh` — **not** a bare `scenicplus.run.sh --lsf`, see below |
+| `scenicplus_run_lsf.sh` | `bsub < scenicplus.bsub.sh` — **not** a bare `scenicplus.run.sh --lsf`; section F above says why |
 
-**The one row that is not a straight swap is `--from`.** The driver walks a
-line, so `--from 7` means every step numbered 7 or higher. `-f 7` becomes
-snakemake's `--forcerun R07_*`, which re-runs that rule and everything that
-DEPENDS on it — and the workflow forks, so `-f 9` leaves R10 and R13 alone and
-`-f 14` leaves R15 and R17 alone. The run still ends green, with a stage you
-meant to redo untouched. Name the stage you want: `-f 10` re-runs dem.
+**Two rows are not straight swaps.** Both drop a property the driver had, and
+in both cases the run still ends green, so nothing tells you.
+
+`--from 7` means every step numbered 7 or higher, because the driver walks a
+line. `-f 7` becomes snakemake's `--forcerun R07_*`, which re-runs that rule and
+everything that DEPENDS on it — and the workflow forks, so `-f 9` leaves R10 and
+R13 alone and `-f 14` leaves R15 and R17 alone. Name the stage you want:
+`-f 10` re-runs dem.
+
+`scenicplus_run_lsf.sh` bsub'd the driver, so the whole pipeline survived a
+dropped shell. `scenicplus.run.sh --lsf` submits the RULES and leaves the
+orchestrator in your shell, which is why the replacement is the wrapper rather
+than the bare command — section F above.
 
 ## G. Watch, then read
 
