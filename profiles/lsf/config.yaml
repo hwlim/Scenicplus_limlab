@@ -7,6 +7,14 @@
 #
 #   pip install snakemake-executor-plugin-cluster-generic==1.0.8
 #
+# THAT PIN IS FOR THIS ENVIRONMENT ONLY. It is 1.0.8 because scenicplus
+# pins snakemake==8.5.5, whose executor interface is 8.x. The sibling
+# scRNA_LimLab_Snake runs snakemake 9 and needs 1.0.9; installing 1.0.8
+# into that env downgrades the plugin below the interface snakemake 9
+# provides, and `--executor cluster-generic` then reports "invalid
+# choice" -- identical to not being installed. Check which env is active
+# before copying this line.
+#
 # The version is not free. scenicplus pins snakemake==8.5.5 AND
 # snakemake-interface-executor-plugins==8.2.0 with `==`, and 1.0.9 of this
 # plugin wants that interface at 9.0 or above, which pip can only satisfy by
