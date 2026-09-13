@@ -32,6 +32,9 @@ say() { printf '  %-4s %s\n' "$1" "$2"; [[ "$1" == FAIL ]] && FAIL=1; return 0; 
 if ! snakemake --executor cluster-generic --help >/dev/null 2>&1; then
     echo "the cluster-generic executor is not installed in this environment."
     echo "  pip install snakemake-executor-plugin-cluster-generic==1.0.8"
+    echo "  (1.0.8 is for THIS env, which pins snakemake 8.5.5. The scRNA"
+    echo "   pipeline runs snakemake 9 and needs 1.0.9 -- check which env"
+    echo "   is active before running that line.)"
     echo "  (1.0.9 requires an interface version scenicplus pins away from; see"
     echo "   profiles/lsf/config.yaml)"
     exit 1
