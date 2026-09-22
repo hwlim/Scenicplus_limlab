@@ -109,6 +109,23 @@ cistopic:
   random_state: 555
 
   # DARs (differentially accessible regions) per cell-type
+  # Region sets smaller than this are NOT written, and the skip is logged.
+  #
+  # A degenerate set aborts the whole motif-enrichment stage: a 29-region Otsu
+  # topic whose regions missed the cisTarget database raised inside pycistarget,
+  # joblib tore down the worker pool, and both R09_cistarget and R10_dem died --
+  # discarding 86 healthy sets after hours of upstream work (issue #1).
+  #
+  # 500 separates degenerate from usable on a SCREEN cCRE database at
+  # fraction_overlap 0.4: the healthy topics there started at 4409 regions while
+  # the two bad ones had 29 and 49. It is config-driven because the right value
+  # depends on the database -- a tiling database tolerates far smaller sets than
+  # a curated cCRE subset does. 0 disables the guard.
+  #
+  # It is a PROXY. What fails is "zero database regions mapped"; a count only
+  # correlates with that, and the 49-region set did map 34 and survive. The cure
+  # is per-set error handling inside SCENIC+, filed upstream.
+  min_regions_per_set: 500
   dar_adjpval_thr: 0.05
   dar_log2fc_thr: 0.5
 

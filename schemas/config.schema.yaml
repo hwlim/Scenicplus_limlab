@@ -108,6 +108,10 @@ properties:
       eta: {type: number}
       eta_by_topic: {type: boolean}
       random_state: {type: integer}
+      # Region sets smaller than this are not written (issue #1). minimum 0
+      # rather than 1, because 0 is how the guard is turned off; a negative
+      # value would silently mean the same thing while reading as a mistake.
+      min_regions_per_set: {type: integer, minimum: 0}
       dar_adjpval_thr: {type: number, minimum: 0, maximum: 1}
       dar_log2fc_thr: {type: number}
 
