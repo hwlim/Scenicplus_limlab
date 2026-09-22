@@ -348,19 +348,86 @@ RULE_TIERS = {
 }
 
 
+# --- Per-rule overrides from config ------------------------------------------
+# The tiers above are measured against the PBMC fixture with headroom, and a
+# real cohort can be several times larger -- so a workspace has to be able to
+# raise one rule without editing the repo, and without the alternative that
+# people actually reach for, which is raising the whole tier and over-reserving
+# eighteen rules to fix one.
+#
+#   resources:
+#     mem_mb:   {R05_region_sets: 200000}    # MB, as `mem_mb` itself
+#     runtime:  {R04_topic_modeling: 600}    # MINUTES, as `runtime` itself
+#
+# UNITS MATCH THE RESOURCE, not the tier names. The tier labels are `96g` and
+# `quick`; an override is a number, in the unit snakemake and LSF already use,
+# because a workspace raising a limit is reading its own job's failure message
+# -- which says MB and minutes -- not this table.
+#
+# AN UNKNOWN RULE NAME IS REFUSED. A typo'd key would otherwise sit in the
+# config doing nothing while its author believes the rule was raised, and the
+# run then dies on the same OOM it was meant to prevent. Same reason
+# `_rule_tiers` refuses an unknown rule rather than defaulting.
+def _resource_overrides(kind):
+    ov = (config.get("resources", {}) or {}).get(kind, {}) or {}
+    unknown = sorted(set(ov) - set(RULE_TIERS))
+    if unknown:
+        raise KeyError(
+            f"resources.{kind} names rule(s) with no tier: {', '.join(unknown)}. "
+            f"An override for a rule that does not exist would silently do "
+            f"nothing. Known: {', '.join(sorted(RULE_TIERS))}")
+    return ov
+
+
+# Validated AT PARSE, both maps, rather than whenever a helper happens to be
+# called. `mem()` only ever looks at `mem_mb` and `rt()` only at `runtime`, so a
+# typo in one would be caught solely because every rule happens to ask for both
+# -- incidental, and it would stop being true the moment a rule set one and not
+# the other. A config error should stop the run before any job is submitted.
+for _kind in ("mem_mb", "runtime"):
+    _resource_overrides(_kind)
+
+
 def mem(rule_name):
     """Memory in MB for a rule, by name. Unknown rule = hard error, not a default.
 
     A rule that falls through to the profile's `default-resources` gets 8000 MB,
     which is under the measured peak of twelve of the eighteen steps. Silence
     there would read as "sized" and mean "8 GB".
+
+    `resources.mem_mb.<rule>` in the config wins over the tier. The tier is
+    still resolved first, so an override on a rule with no tier is refused
+    rather than quietly inventing one.
     """
-    return MEM_TIERS[_rule_tiers(rule_name)[0]]
+    tiered = MEM_TIERS[_rule_tiers(rule_name)[0]]
+    return int(_resource_overrides("mem_mb").get(rule_name, tiered))
 
 
 def rt(rule_name):
-    """Wall-clock minutes for a rule, by name."""
-    return TIME_TIERS[_rule_tiers(rule_name)[1]]
+    """Wall-clock minutes for a rule, by name.
+
+    `resources.runtime.<rule>` in the config wins over the tier.
+    """
+    tiered = TIME_TIERS[_rule_tiers(rule_name)[1]]
+    return int(_resource_overrides("runtime").get(rule_name, tiered))
+
+
+def resource_overrides_report():
+    """Every override in force, for the log and the provenance record.
+
+    Printed once at parse rather than left implicit: a reservation that differs
+    from the table in this file is the first thing to check when a job is
+    killed, and `mem_mb=200000` in an LSF epilogue does not say whether it came
+    from a tier or from someone's config.
+    """
+    lines = []
+    for kind, unit in (("mem_mb", "MB"), ("runtime", "min")):
+        for rule_name, value in sorted(_resource_overrides(kind).items()):
+            tiered = (MEM_TIERS[_rule_tiers(rule_name)[0]] if kind == "mem_mb"
+                      else TIME_TIERS[_rule_tiers(rule_name)[1]])
+            lines.append(f"  {rule_name}: {kind} {tiered} -> {value} {unit} "
+                         f"(config override)")
+    return lines
 
 
 def _rule_tiers(rule_name):

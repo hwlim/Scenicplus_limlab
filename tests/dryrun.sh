@@ -390,9 +390,21 @@ heads = [(m.start(), m.group(1))
 got, nores = {}, []
 for i, (pos, name) in enumerate(heads):
     block = txt[pos:heads[i + 1][0] if i + 1 < len(heads) else len(txt)]
-    m = re.search(r"^    resources:[^\n]*?mem_mb=(\d+)[^\n]*?runtime=(\d+)", block, re.M)
-    if m:
-        got[name] = (int(m.group(1)), int(m.group(2)))
+    # PARSE THE LINE INTO KEYS, do not assume an order. The previous pattern
+    # was `mem_mb=(\d+)[^\n]*?runtime=(\d+)`, which requires mem_mb to come
+    # FIRST -- and snakemake prints
+    #     resources: tmpdir=..., runtime=60, mem_mb=4000, mem=4 GB, mem_mib=3815
+    # so it matched NOTHING. Measured 2026-09-21: 0 of 21 rules matched, every
+    # one was reported as unsized, and every resolved value in fact agreed with
+    # the tier table. Two things made that read as a small problem instead of a
+    # broken check: the failure branch printed only the first five lines, and
+    # "5 rules are unsized" is a plausible-looking result. A check whose
+    # everything-is-broken output looks like a partial failure is worse than
+    # one that crashes.
+    line = re.search(r"^    resources: (.*)$", block, re.M)
+    kv = dict(re.findall(r"(\w+)=([^,\s]+)", line.group(1))) if line else {}
+    if "mem_mb" in kv and "runtime" in kv:
+        got[name] = (int(kv["mem_mb"]), int(kv["runtime"]))
     elif name != "all":
         nores.append(name)
 src, ns = open(sys.argv[2]).read(), {}
@@ -426,7 +438,15 @@ if [[ $? -eq 0 ]]; then
     say ok "every rule's resolved mem/runtime matches rules/common.smk"
 else
     say FAIL "a rule's resolved resources disagree with the tier table"
-    sed -n '1,5p' "$WORK/res.txt"
+    # ALL of them, not the first five. Truncating here is what let a total
+    # parse failure pass for five stragglers; the list is at most 21 lines.
+    #
+    # Note for anyone whose config sets `resources.mem_mb` / `resources.runtime`
+    # overrides: this check compares against the TIER TABLE, so an override will
+    # be reported here as a disagreement. That is correct -- it is telling you
+    # the reservation is not the tier -- and it does not arise in this harness,
+    # which builds its workspace from the shipped template.
+    cat "$WORK/res.txt"
 fi
 
 # 8. the reproducibility pinning actually reaches a job's environment.
