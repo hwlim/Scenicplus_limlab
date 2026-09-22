@@ -182,6 +182,17 @@ properties:
     properties:
       n_cpu: {type: integer, minimum: 1}
       seed: {type: integer}
+      # Per-rule overrides of rules/common.smk's tiers. The KEYS are rule names
+      # and cannot be enumerated here without this schema going stale every
+      # time a rule is added, so the schema checks the VALUES and
+      # `_resource_overrides()` in common.smk refuses an unknown rule name --
+      # which it can do, because it holds RULE_TIERS.
+      mem_mb:
+        type: object
+        additionalProperties: {type: integer, minimum: 1}
+      runtime:
+        type: object
+        additionalProperties: {type: integer, minimum: 1}
 
   visualization:
     type: object

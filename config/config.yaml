@@ -182,6 +182,28 @@ resources:
   n_cpu: 16
   seed: 555
 
+  # PER-RULE OVERRIDES of the tiers in rules/common.smk. Optional; omit both
+  # keys and every rule keeps its tier.
+  #
+  # The tiers are measured against the PBMC fixture with headroom, and a real
+  # cohort can be several times larger -- so one rule has to be raisable from
+  # the workspace, without editing the repo and without the thing people
+  # actually do instead, which is raising the whole tier and over-reserving
+  # eighteen rules to fix one.
+  #
+  # UNITS ARE THE RESOURCE'S OWN, not the tier labels: mem_mb in MB, runtime in
+  # MINUTES. That is what the job's own failure message reports, which is where
+  # anyone setting these has just been looking.
+  #
+  # A rule name with no tier is REFUSED at parse. A typo here would otherwise
+  # sit doing nothing while its author believes the rule was raised, and the run
+  # would die on the same OOM it was meant to prevent.
+  #
+  # mem_mb:
+  #   R05_region_sets: 200000
+  # runtime:
+  #   R04_topic_modeling: 600
+
 # -----------------------------------------------------------------------------
 # Visualization
 # -----------------------------------------------------------------------------
