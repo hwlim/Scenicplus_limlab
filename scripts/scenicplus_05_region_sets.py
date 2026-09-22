@@ -16,19 +16,58 @@ import pandas as pd
 import yaml
 
 
-def write_bed(regions, path: Path):
+def write_bed(regions, path: Path, min_regions: int = 0) -> bool:
+    """Write one region set. -> True if written, False if skipped.
+
+    MINIMUM SIZE, and the guard lives HERE rather than at one call site.
+
+    A degenerate region set aborts the whole motif-enrichment stage. Measured
+    on a real run: Otsu binarization produced a 29-region topic out of 40, none
+    of whose regions overlapped the cisTarget database, and pycistarget's
+    ValueError propagated through joblib's loky backend and tore down the pool
+    -- so both R09_cistarget and R10_dem died and the 86 healthy sets were
+    discarded, after many hours of upstream stages. See issue #1.
+
+    IT IS A PROXY, NOT A CURE. What actually fails is "zero DATABASE regions
+    mapped", and a region count only correlates with that: on the same run a
+    49-region topic mapped 34 database regions and survived, so a larger set
+    that happens to miss the cCREs would still crash. This lowers the
+    probability; the fix that removes the failure mode is per-set error
+    handling inside SCENIC+, which is filed upstream.
+
+    ALL THREE WRITERS get it, which is why it is not in the Otsu loop. The
+    original report saw only Otsu produce a tiny set, but DARs are 1-vs-rest
+    per cell type and `find_diff_features` skips only a completely empty
+    result -- a rare cell type is the same crash through a different door.
+
+    EVERY SKIP IS LOGGED, including the two that were already silent. A thin
+    region set and a healthy one must not look alike in the output, and
+    `write_bed` previously returned quietly both for an all-unparseable region
+    list and for an empty one.
+    """
     rows = []
+    malformed = 0
     for r in regions:
         try:
             chrom, rest = r.split(":")
             start, end = rest.split("-")
             rows.append((chrom, int(start), int(end), r))
         except ValueError:
-            continue
+            malformed += 1
+    if malformed:
+        print(f"  [region_sets] {path.name}: {malformed} region name(s) are not "
+              f"chrom:start-end and were dropped")
     if not rows:
-        return
+        print(f"  [region_sets] SKIP {path.name}: no usable regions "
+              f"({len(regions)} in, {malformed} malformed)")
+        return False
+    if len(rows) < min_regions:
+        print(f"  [region_sets] SKIP {path.name}: {len(rows)} regions "
+              f"(< min_regions_per_set = {min_regions})")
+        return False
     df = pd.DataFrame(rows, columns=["chrom", "start", "end", "name"])
     df.to_csv(path, sep="\t", header=False, index=False)
+    return True
 
 
 def main():
@@ -43,6 +82,11 @@ def main():
         cfg = yaml.safe_load(fh)
     celltype_col = cfg["input"]["celltype_column"]
     ct_cfg = cfg["cistopic"]
+    # Config-driven, because the right value depends on the cisTarget database
+    # and on fraction_overlap -- a SCREEN cCRE database is a curated subset of
+    # the genome rather than a tiling of it, so a small set maps far worse
+    # against it than against a tiling one.
+    min_regions = int(ct_cfg.get("min_regions_per_set", 500))
 
     with open(args.in_pkl, "rb") as fh:
         cto = pickle.load(fh)
@@ -65,10 +109,13 @@ def main():
     top_dir  = out_dir / "Topics_top_3k"
     otsu_dir.mkdir(exist_ok=True)
     top_dir.mkdir(exist_ok=True)
+    n_skipped = 0
     for topic, df in region_bin_otsu.items():
-        write_bed(df.index.tolist(), otsu_dir / f"{topic}.bed")
+        n_skipped += not write_bed(df.index.tolist(),
+                                   otsu_dir / f"{topic}.bed", min_regions)
     for topic, df in region_bin_top.items():
-        write_bed(df.index.tolist(), top_dir / f"{topic}.bed")
+        n_skipped += not write_bed(df.index.tolist(),
+                                   top_dir / f"{topic}.bed", min_regions)
 
     # ----- DAR region sets -----
     imputed = impute_accessibility(
@@ -95,9 +142,14 @@ def main():
         if df is None or df.shape[0] == 0:
             continue
         safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in str(ct_name))
-        write_bed(df.index.tolist(), dar_dir / f"{safe}.bed")
+        n_skipped += not write_bed(df.index.tolist(),
+                                   dar_dir / f"{safe}.bed", min_regions)
 
-    print(f"[region_sets] Wrote region sets under: {out_dir}")
+    # The count, stated once, so a run that dropped sets says so in its last
+    # line rather than only in the middle of the log.
+    print(f"[region_sets] Wrote region sets under: {out_dir}"
+          + (f"  ({n_skipped} set(s) skipped, min_regions_per_set={min_regions})"
+             if n_skipped else ""))
     for sub in sorted(os.listdir(out_dir)):
         sub_dir = out_dir / sub
         if sub_dir.is_dir():
