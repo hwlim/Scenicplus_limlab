@@ -41,9 +41,18 @@ def _fig(stem):
 rule R19_postprocess_tsv:
     """The eRegulon tables a collaborator can read without python.
 
-    Four outputs are unconditional. The AUC matrices and the RSS tables are
-    gated on the AUC modalities being non-empty and the cell-type column being
-    found, so they are written but not declared.
+    SIX outputs are unconditional, including the two per-cell AUC matrices.
+    Those were written-but-not-declared until 2026-10-02, gated on the AUC
+    modalities being non-empty; the script now writes them header-only in that
+    case, exactly as eRegulons_direct.tsv already did, so the gate is gone and
+    with it the reason not to declare them. They are an INPUT to the hand-run
+    activity test in scRNA_LimLab_Snake, which is the use that made an
+    undeclared file expensive: snakemake could neither rebuild nor clean it,
+    and an absent path does not distinguish "no AUC modality" from "the stage
+    died".
+
+    Only the RSS tables remain undeclared, and for the other reason in the
+    header: their NAME depends on the cell-type column being found.
     """
     input:
         mdata=stage_path("grn", "scplusmdata.h5mu"),
@@ -53,6 +62,8 @@ rule R19_postprocess_tsv:
         extended=os.path.join(TSV, "eRegulons_extended.tsv"),
         combined=os.path.join(TSV, "eRegulons_combined.tsv"),
         tf_summary=os.path.join(TSV, "TF_summary.tsv"),
+        auc_gene=os.path.join(TSV, "AUC_gene_per_cell.tsv"),
+        auc_region=os.path.join(TSV, "AUC_region_per_cell.tsv"),
     log:
         log_path("R19_postprocess_tsv")
     threads: 1

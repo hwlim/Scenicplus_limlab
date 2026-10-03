@@ -112,12 +112,33 @@ for name in sorted(tsv_declared):
     say(name in tsv_written, f"declared TSV {name!r} is written by the script",
         f"script writes: {sorted(tsv_written)}")
 
-# The four unconditional ones must all be declared; the rest are gated on the
-# AUC modalities being non-empty or the cell-type column being found.
+# The SIX unconditional ones must all be declared; what remains gated is the
+# RSS table, whose name depends on the cell-type column being found.
+#
+# The two AUC matrices joined this set on 2026-10-02. They were written behind
+# an `if not .empty` guard, which was the only thing preventing their
+# declaration; the script now writes them header-only instead, as
+# eRegulons_direct.tsv already did.
 UNCONDITIONAL_TSV = {"eRegulons_direct.tsv", "eRegulons_extended.tsv",
-                     "eRegulons_combined.tsv", "TF_summary.tsv"}
+                     "eRegulons_combined.tsv", "TF_summary.tsv",
+                     "AUC_gene_per_cell.tsv", "AUC_region_per_cell.tsv"}
 missing = UNCONDITIONAL_TSV - tsv_declared
 say(not missing, "every unconditional TSV is declared", f"missing: {sorted(missing)}")
+
+# ...and that the AUC writes really are unconditional, which the check above
+# does NOT establish: it only matches `out_dir / "name"` somewhere in the
+# script, wherever that line happens to sit.
+#
+# FOUND BY A MUTATION PROBE. Re-adding `if not auc_gene.empty:` around the
+# write SURVIVED the test above, because the write is still there -- it is
+# just skipped. Snakemake would catch it, but only on a run whose AUC
+# modality is genuinely empty, which is rare enough that the regression could
+# sit for months. Reading the source closes that gap now.
+guarded = re.findall(r"if\s+not\s+auc_(?:gene|region)\.empty", post)
+say(not guarded,
+    "the AUC matrices are written unconditionally, so declaring them cannot "
+    "turn a legitimate empty modality into a MissingOutput failure",
+    f"guarded write(s) found: {guarded}")
 
 print()
 if FAIL:

@@ -97,10 +97,23 @@ def main():
         gene_keys=["direct_gene_based_AUC", "extended_gene_based_AUC"],
         region_keys=["direct_region_based_AUC", "extended_region_based_AUC"],
     )
-    if not auc_gene.empty:
-        auc_gene.to_csv(out_dir / "AUC_gene_per_cell.tsv", sep="\t")
-    if not auc_region.empty:
-        auc_region.to_csv(out_dir / "AUC_region_per_cell.tsv", sep="\t")
+    # WRITTEN UNCONDITIONALLY, like the eRegulon tables above, so that they can
+    # be DECLARED rule outputs. The guard that used to sit here was the only
+    # reason they could not be -- and an absent file is the worst of the three
+    # possible states: a reader cannot tell "no AUC modality" from "the stage
+    # died before this line" from "someone deleted it".
+    #
+    # An empty frame writes a header-only file, which is exactly what
+    # eRegulons_direct.tsv already does for a run that found nothing. A
+    # downstream reader then refuses it BY NAME instead of reporting a missing
+    # path, and snakemake can rebuild and clean it like everything else.
+    auc_gene.to_csv(out_dir / "AUC_gene_per_cell.tsv", sep="\t")
+    auc_region.to_csv(out_dir / "AUC_region_per_cell.tsv", sep="\t")
+    if auc_gene.empty or auc_region.empty:
+        print("[postprocess_tsv] NOTE: no %s AUC modality in the MuData; the "
+              "corresponding TSV is header-only."
+              % " or ".join(k for k, v in (("gene", auc_gene),
+                                           ("region", auc_region)) if v.empty))
 
     # RSS
     obs = md.obs.copy()
