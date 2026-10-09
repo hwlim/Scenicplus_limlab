@@ -31,7 +31,7 @@
     50 At least one job did not complete successfully.
     ```
 
-20260730: Flattened the inner snakemake (`f71405a`)
+20260730: Flattened the inner snakemake (`8b86655`)
   - SCENIC+'s `grn_inference`/`prepare_data` steps ran through an opaque child
     snakemake spawned inside step 07. Replaced with 13 native driver stages
     dispatched by `scripts/scenicplus_06_grn_stage.py`, one `scenicplus` CLI
@@ -63,15 +63,15 @@
 
     | | stopped at | the disagreement | fix |
     |---|---|---|---|
-    | 1 | install "succeeded", no `bin/scenicplus` | user site vs env site-packages | `c0c672e` |
-    | 2 | pip took an sdist needing rust | login-node glibc vs compute-node glibc | `b6a6e05` |
-    | 3 | OOM with 128 GB requested | `rusage[mem]` reserves, `-M` enforces | `61e184b` |
-    | 4 | step 6 `CXXABI_1.3.15` | a wheel's libstdc++ vs conda's | `caf82cd` |
-    | 5 | step 6 "no cells in both assays" | cisTopic's tagged barcodes vs the RNA AnnData's | `087ee71` |
-    | 6 | step 7 exited 0 with no chromsizes | what it wrote vs what step 8 needed | `3f9b6c5` |
-    | 7 | step 8 pandas `KeyError` | Ensembl vs UCSC chromosome names | `3e07d07` |
-    | 8 | step 20 `'ggplot' has no attribute 'savefig'` | matplotlib's API vs plotnine's | `187bdf3` |
-    | 9 | nothing -- a 301-megapixel PNG | `plot_rss` multiplies the figsize it is given | `9511ac7` |
+    | 1 | install "succeeded", no `bin/scenicplus` | user site vs env site-packages | `513bb6a` |
+    | 2 | pip took an sdist needing rust | login-node glibc vs compute-node glibc | `30dee9c` |
+    | 3 | OOM with 128 GB requested | `rusage[mem]` reserves, `-M` enforces | `5248b6f` |
+    | 4 | step 6 `CXXABI_1.3.15` | a wheel's libstdc++ vs conda's | `d34b2ca` |
+    | 5 | step 6 "no cells in both assays" | cisTopic's tagged barcodes vs the RNA AnnData's | `7ac78d8` |
+    | 6 | step 7 exited 0 with no chromsizes | what it wrote vs what step 8 needed | `dbd8c66` |
+    | 7 | step 8 pandas `KeyError` | Ensembl vs UCSC chromosome names | `f8f3931` |
+    | 8 | step 20 `'ggplot' has no attribute 'savefig'` | matplotlib's API vs plotnine's | `4e3072b` |
+    | 9 | nothing -- a 301-megapixel PNG | `plot_rss` multiplies the figsize it is given | `50352a7` |
 
   - #6 and #7 are one cause. `download_genome_annotations` derives chromsizes
     from NCBI E-utilities `db=genome`, a RETIRED database that answers HTTP 200
@@ -92,7 +92,7 @@
     monocytes, TBX21 in effector/MAIT -- consistent with the FigR result on the
     same data. 25 cell types over 1149 cells is too fine for RSS; collapse to
     lineage before trusting per-type values.
-  - `scenicplus_make_genome_files.R` (`91c3df0`): both files from a pinned
+  - `scenicplus_make_genome_files.R` (`d06a195`): both files from a pinned
     EnsDb, so the assembly is the one chosen rather than the one Ensembl serves
     today. Prints `chr1 = 195,471,971` for mm10; GRCm39's is 195,154,279. Its
     hg38 output matched the chromsizes from the working run on all 25 shared
@@ -106,7 +106,7 @@
   - Three reasons. The LSF launcher bsubs the whole driver as ONE job sized for
     the heaviest stage, so step 20's plots hold 16 cores and 128 GB for hours.
     `run_step` hashes config but NOT code, so a step whose script changed still
-    reads fresh -- which is why no workspace re-ran step 3 after `087ee71`. And
+    reads fresh -- which is why no workspace re-ran step 3 after `7ac78d8`. And
     `input.assembly` is dead config that looks live.
   - Open, not decided: whether step NUMBERS survive as the interface
     (`--from 7`) once rule names exist.
@@ -706,7 +706,7 @@
     MuData is the trade declined for candidate 2.
 
 20260912: the cluster run -- I5, I6, I7 validated; one defect of mine found
-  - Full 21-rule run on the PBMC arc fixture at 5d01b36, ~108 min summed across
+  - Full 21-rule run on the PBMC arc fixture at 29500b1, ~108 min summed across
     six nodes, `celltype_column: wsnn_res.0.3`.
   - **I5 HOLDS.** Nothing over its reservation, nothing killed, nothing pended,
     including the 256000 MB R09 asks for -- the one unchecked assumption in the

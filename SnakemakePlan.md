@@ -19,7 +19,7 @@ was reasoned and the deltas are visible.
 I2's mm10 check can be diffed against a real run rather than against the
 generator's own output. What it also produced is the defect below.
 
-**`input.reduction` exists, and three steps read it** (`57ecceb`). It names the
+**`input.reduction` exists, and three steps read it** (`969302c`). It names the
 Seurat reduction that becomes `X_umap`, the layout every figure is drawn on.
 Consequences for this plan, all small but none automatic:
 
@@ -68,7 +68,7 @@ knows each of the 13 flattened CLI stages' flags, and it took a run through all
 20 steps to get right. Rules will call it with `--stage X`, exactly as the bash
 driver does.
 
-**Not a re-flattening.** The inner-snakemake removal (`f71405a`) stands. What
+**Not a re-flattening.** The inner-snakemake removal (`8b86655`) stands. What
 gets replaced is the *scheduling* layer — `run_step`'s sentinel + `.cfgsha` +
 cascade logic in `scripts/scenicplus_run_pipeline.sh` — with Snakemake's DAG.
 
@@ -1095,7 +1095,7 @@ report for something interactive.
 
 ### THE RUN HAPPENED, 2026-09-12 — I5, I6 and I7 are cluster-validated
 
-Full run on the PBMC arc fixture at `5d01b36`, 21 rules, ~108 minutes of summed
+Full run on the PBMC arc fixture at `29500b1`, 21 rules, ~108 minutes of summed
 job time across six nodes. `celltype_column: wsnn_res.0.3`, reduction
 `wnn.umap`.
 
@@ -1340,7 +1340,7 @@ continues. `assembly: hg19` over hg38 data therefore passes every check and
 reaches the report disagreeing, and now says so in red.
 
 **THE FIXTURE PATTERN CAME BACK, INSIDE THE COMMIT THAT DOCUMENTED IT.**
-`75af5ae` fixed the report reading key names the producer never writes, wrote
+`d4f5e96` fixed the report reading key names the producer never writes, wrote
 the lesson into `tests/record_keys.py`, and then hand-wrote
 `"chr1_matches": "hg38"` into `tests/report_render.sh` — a VALUE the producer
 cannot emit. Names anchored on the producer, values still invented, and the
