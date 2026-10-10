@@ -104,3 +104,16 @@ list = use every cell.
     is on `PATH`.
   - Keep `README.md` in sync with how to set up and run the pipeline.
   - Keep the layout flat — no empty folders.
+
+## Commits
+- **No AI-assistant attribution of work in this repository** — not in commit
+  messages (no trailer or line crediting an AI tool), not in commit author or
+  committer identity, not in code comments or docs, and not in PR titles or
+  descriptions.
+- `.githooks/ai-attribution-hook` enforces this as `commit-msg`, `pre-commit`
+  and `pre-push`; README Setup step 5 installs it. It is a backstop — the rule
+  binds even where its patterns miss. **Never bypass it with `--no-verify`.**
+  If it rejects a commit, remove the attribution and commit again.
+- Writing about the rule is fine; writing an attribution string out in full is
+  not. Where a test or an example needs one, assemble it at run time, as the
+  README's install check does.

@@ -970,3 +970,23 @@ are as shipped. A green run says the plumbing holds, not that the numbers mean
 anything -- and every figure produced before today was drawn on a layout nobody
 chose, which is the same lesson arriving through the output rather than through
 a crash.
+
+20261009: The AI-attribution hook is versioned and documented
+  - `.githooks/ai-attribution-hook` is now in the repo. One script
+    serves `commit-msg`, `pre-commit` and `pre-push`, choosing its mode from the
+    name it runs under; it rejects AI-assistant attribution in commit messages,
+    commit identities and added code. README Setup step 5 installs it, and
+    CLAUDE.md `## Commits` states the rule it backs.
+  - **Two install routes, split on `core.hooksPath` (git 2.9).** With it, hooks
+    go wherever `git rev-parse --git-path hooks` says, which follows
+    `core.hooksPath` even when it is set globally -- and that matters, because
+    with a global hooksPath git never reads `.git/hooks`, so a copy there does
+    nothing. Without it, hooks always live in `$(git rev-parse --git-dir)/hooks`.
+  - **The two machines do not share hooks here.** INstall on each machine that
+    commits.
+  - **Below git 1.9 only the message and identity checks work.** The code scan
+    excludes the hook's own file with an `:(exclude)` pathspec, which arrived in
+    1.9. Older git cannot honour it, and because the script does not check git's
+    exit status, the scan passes rather than fails.
+  - Attribution strings are never written out in full in this repo, examples
+    included. The README's install check assembles its test trailer at run time.

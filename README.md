@@ -152,6 +152,75 @@ old driver's `results/` and `interim/` layout is in RUNBOOK section 5.
    pip install "scenicplus @ git+https://github.com/aertslab/scenicplus.git"
    ```
 
+5. **If you commit to this repository**, install the attribution hook. It
+   rejects AI-assistant attribution in commit messages, in commit author and
+   committer identities, and in added code. One script,
+   `.githooks/ai-attribution-hook`, serves three hooks -- `commit-msg`,
+   `pre-commit` and `pre-push` -- and picks its mode from the name it runs
+   under, so it is installed once and the three names point at it.
+
+   Run this from the repository root, **on the machine whose git makes the
+   commits**.
+
+   First find which route applies: `git --version`.
+
+   **git 2.9 or later** -- ask git where it actually reads hooks. If
+   `core.hooksPath` is set, even globally, git ignores `.git/hooks` completely,
+   and a copy there would do nothing:
+
+   ```bash
+   hooks=$(git rev-parse --git-path hooks)
+   echo "$hooks"   # outside this repo? that is a global hooks dir, shared by every repo you commit to
+   ```
+
+   **Older git, without `core.hooksPath`** (such as the login node's 1.x) --
+   hooks always live inside this clone's git directory:
+
+   ```bash
+   hooks=$(git rev-parse --git-dir)/hooks
+   ```
+
+   Then, for either route:
+
+   ```bash
+   mkdir -p "$hooks"
+   cp .githooks/ai-attribution-hook "$hooks/" && chmod +x "$hooks/ai-attribution-hook"
+   for h in commit-msg pre-commit pre-push; do
+     if cmp -s "$hooks/$h" .githooks/ai-attribution-hook; then
+       :   # already this hook, as a symlink or a copy
+     elif [ -e "$hooks/$h" ]; then
+       echo "$h: a different hook is already installed -- call ai-attribution-hook from it"
+     else
+       ln -s ai-attribution-hook "$hooks/$h"
+     fi
+   done
+   ```
+
+   `chmod +x` is not optional: git skips a hook without the executable bit,
+   silently, and the share does not preserve it reliably. An existing hook of
+   your own is left in place rather than overwritten.
+
+   Check it on the machine -- it should print `Rejected` and exit 1. The
+   test trailer is assembled at run time so that it never appears whole in
+   this repository:
+
+   ```bash
+   msg=$(mktemp); printf 'test\n\nCo-Authored-By: %s <%s@%s>\n' Claude noreply anthropic.com > "$msg"
+   "$hooks/commit-msg" "$msg"; echo "exit $?"; rm -f "$msg"
+   ```
+
+   **On git older than 1.9, only the commit-message and identity checks
+   work.** The code scan (`pre-commit`, and the diff half of `pre-push`)
+   excludes the hook's own file with an `:(exclude)` pathspec, which arrived in
+   git 1.9. Older git cannot honour it, and since the script does not check
+   git's exit status, the scan passes rather than failing.
+
+   To have new clones pick the hook up without this step, put the same four
+   files -- the script and the three symlinks -- in a git template directory
+   (`git config --global init.templateDir <dir>`, whose `hooks/` is copied in
+   at `git init` and `git clone`). Re-running `git init` in an existing clone
+   is safe and copies in anything missing.
+
 ## Running an analysis
 
 ```bash
